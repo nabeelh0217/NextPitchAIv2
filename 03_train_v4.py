@@ -50,7 +50,7 @@ from tensorflow.keras import backend as K
 # =========================
 # Config
 # =========================
-BASE_DIR = Path(r"C:\Users\nabzt\OneDrive\Desktop\PitchGPT")
+BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data_v4"
 
 # Hyperparameters

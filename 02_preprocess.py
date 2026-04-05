@@ -32,7 +32,7 @@ from sklearn.preprocessing import StandardScaler
 # =========================
 # Config
 # =========================
-BASE_DIR = Path(r"C:\Users\nabzt\OneDrive\Desktop\PitchGPT")
+BASE_DIR = Path(__file__).resolve().parent
 RAW_PATH = BASE_DIR / "statcast_raw_v4.parquet"
 OUT_DIR  = BASE_DIR / "data_v4"
 OUT_DIR.mkdir(exist_ok=True)

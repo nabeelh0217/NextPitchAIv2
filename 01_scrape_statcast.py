@@ -24,7 +24,7 @@ from pybaseball import statcast
 # =========================
 # Config
 # =========================
-BASE_DIR = Path(r"C:\Users\nabzt\OneDrive\Desktop\PitchGPT")
+BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_PATH = BASE_DIR / "statcast_raw_v4.parquet"
 
 # Seasons to pull — more data = better embeddings for pitcher/batter IDs.
