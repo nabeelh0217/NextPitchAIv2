@@ -4,10 +4,22 @@ Predicts the next pitch type (fastball / breaking / offspeed / special) from
 MLB Statcast data using a BiLSTM + embeddings model with rich, leakage-free
 engineered features. Continuation of NextPitchAI, revamped for full-scale release.
 
+## Quick start (Windows)
+
+Double-click `run_pipeline.bat` (or run it from a Command Prompt in the
+repo folder). It creates a virtual environment, installs dependencies,
+and runs all three steps in order. Steps whose output already exists are
+skipped, so a re-run after a failure picks up where it left off:
+
+```bat
+run_pipeline.bat            :: run everything (skip completed steps)
+run_pipeline.bat --fresh    :: force re-run of every step
+```
+
 ## Pipeline (v5)
 
-Run the three scripts in order **on a machine with unrestricted internet**
-(Baseball Savant is scraped directly):
+Or run the three scripts manually, in order, **on a machine with
+unrestricted internet** (Baseball Savant is scraped directly):
 
 ```bash
 pip install pybaseball pandas numpy pyarrow scikit-learn joblib imbalanced-learn matplotlib tensorflow
