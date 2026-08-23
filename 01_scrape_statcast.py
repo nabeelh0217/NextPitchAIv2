@@ -1,17 +1,19 @@
 """
-NextPitchAI v4 — Step 1: Scrape Statcast data
+NextPitchAI v5 — Step 1: Scrape Statcast data
 ================================================
 Pulls pitch-level data from Baseball Savant via pybaseball.
-Includes MLBAM IDs for pitcher/batter personalization.
+Includes MLBAM IDs for pitcher/batter personalization, plus v5
+columns: game date, ballpark (home team), catcher, times-through-order,
+and pitcher rest days.
 
 Requirements:
-    pip install pybaseball pandas
+    pip install pybaseball pandas pyarrow
 
 Usage:
     python 01_scrape_statcast.py
 
 Output:
-    statcast_raw_v4.parquet  (~2-4 GB for multiple seasons)
+    statcast_raw_v5.parquet  (~2-4 GB for multiple seasons)
 """
 
 import time
@@ -24,8 +26,8 @@ from pybaseball import statcast
 # =========================
 # Config
 # =========================
-BASE_DIR = Path(r"C:\Users\nabzt\OneDrive\Desktop\PitchGPT")
-OUTPUT_PATH = BASE_DIR / "statcast_raw_v4.parquet"
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_PATH = BASE_DIR / "statcast_raw_v5.parquet"
 
 # Seasons to pull — more data = better embeddings for pitcher/batter IDs.
 # Each full season is ~700k-750k pitches. 3 seasons gives ~2.2M rows.
@@ -36,12 +38,12 @@ SEASONS = [
     ("2024-03-28", "2024-09-29"),
 ]
 
-# Columns we need for v4
+# Columns we need for v5
 # (pybaseball returns ~90 columns; we keep only what matters)
 KEEP_COLUMNS = [
     # Identifiers
-    "game_pk", "at_bat_number", "pitch_number",
-    "pitcher", "batter",                        # <-- MLBAM IDs (NEW for v4)
+    "game_pk", "game_date", "at_bat_number", "pitch_number",
+    "pitcher", "batter",                        # <-- MLBAM IDs
 
     # Target
     "pitch_type",                               # e.g. FF, SL, CH, CU, etc.
@@ -65,7 +67,15 @@ KEEP_COLUMNS = [
     "plate_x", "plate_z",
     "pfx_x", "pfx_z",                          # horizontal/vertical movement
 
-    # Outcome (useful for future extensions)
+    # v5: environment & personnel
+    "home_team",                                # ballpark proxy (park factors)
+    "fielder_2",                                # catcher MLBAM ID (game-calling)
+
+    # v5: pitcher workload (Statcast provides these precomputed)
+    "n_thruorder_pitcher",                      # times through the order
+    "pitcher_days_since_prev_game",             # rest days
+
+    # Outcome (used for batter swing/whiff profiles + future extensions)
     "description", "events", "type",
 ]
 
