@@ -116,11 +116,25 @@ if errorlevel 1 (
 echo Dependencies OK.
 
 REM ---- 4. Step 1: scrape ----
-if exist "statcast_raw_v5.parquet" if %FRESH%==0 (
+REM A real multi-season scrape is hundreds of MB+. Treat anything smaller
+REM as corrupt/incomplete (e.g. left over from an interrupted run) rather
+REM than trusting mere file existence.
+set MIN_PARQUET_BYTES=1000000
+set SCRAPE_VALID=0
+if exist "statcast_raw_v5.parquet" (
+    for %%A in ("statcast_raw_v5.parquet") do set SCRAPE_SIZE=%%~zA
+    if !SCRAPE_SIZE! GEQ %MIN_PARQUET_BYTES% set SCRAPE_VALID=1
+)
+
+if %SCRAPE_VALID%==1 if %FRESH%==0 (
     echo.
-    echo [1/3] SKIP scrape — statcast_raw_v5.parquet already exists.
+    echo [1/3] SKIP scrape — statcast_raw_v5.parquet already exists ^(!SCRAPE_SIZE! bytes^).
     echo       ^(use "run_pipeline.bat --fresh" to re-scrape^)
     goto :preprocess
+)
+if exist "statcast_raw_v5.parquet" if %SCRAPE_VALID%==0 (
+    echo statcast_raw_v5.parquet exists but looks incomplete/corrupt ^(!SCRAPE_SIZE! bytes^) — deleting and re-scraping.
+    del /f /q "statcast_raw_v5.parquet"
 )
 echo.
 echo [1/3] Scraping Statcast data — this takes 30-90 minutes ...
@@ -132,6 +146,11 @@ if errorlevel 1 (
 )
 if not exist "statcast_raw_v5.parquet" (
     echo ERROR: scrape finished but statcast_raw_v5.parquet was not created.
+    goto :fail
+)
+for %%A in ("statcast_raw_v5.parquet") do set SCRAPE_SIZE=%%~zA
+if !SCRAPE_SIZE! LSS %MIN_PARQUET_BYTES% (
+    echo ERROR: scrape finished but statcast_raw_v5.parquet is only !SCRAPE_SIZE! bytes — something went wrong.
     goto :fail
 )
 

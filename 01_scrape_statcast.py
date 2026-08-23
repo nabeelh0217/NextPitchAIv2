@@ -16,6 +16,8 @@ Output:
     statcast_raw_v5.parquet  (~2-4 GB for multiple seasons)
 """
 
+import os
+import sys
 import time
 from pathlib import Path
 from datetime import date, timedelta
@@ -139,7 +141,7 @@ def main():
 
     if not all_data:
         print("No data collected! Check your internet connection and pybaseball.")
-        return
+        sys.exit(1)
 
     combined = pd.concat(all_data, ignore_index=True)
     print(f"\n{'='*50}")
@@ -165,8 +167,18 @@ def main():
         ["game_pk", "at_bat_number", "pitch_number"]
     ).reset_index(drop=True)
 
-    # Save as parquet (much faster + smaller than CSV)
-    combined.to_parquet(OUTPUT_PATH, index=False)
+    if len(combined) == 0:
+        print("ERROR: no rows survived cleanup — refusing to write an empty file.")
+        sys.exit(1)
+
+    # Save as parquet (much faster + smaller than CSV). Write to a temp file
+    # first and atomically replace the final path only once the write has
+    # fully succeeded — so a closed window, sleep, or crash mid-write can
+    # never leave a corrupt/empty file sitting at OUTPUT_PATH (which a
+    # later run would otherwise mistake for a completed scrape).
+    tmp_path = OUTPUT_PATH.with_suffix(".parquet.tmp")
+    combined.to_parquet(tmp_path, index=False)
+    os.replace(tmp_path, OUTPUT_PATH)
     print(f"\nSaved to: {OUTPUT_PATH}")
     print(f"Final size: {len(combined):,} rows, {len(combined.columns)} columns")
 
