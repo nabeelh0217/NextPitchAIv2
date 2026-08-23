@@ -1,16 +1,21 @@
 """
-NextPitchAI v4 — Step 3: Train model
+NextPitchAI v5 — Step 3: Train model
 ======================================
-Combines the PROVEN training strategy from the 66% run:
+Keeps the proven training strategy from the 66% run:
   - Focal loss (gamma=2)
-  - RandomOverSampler for class balance
+  - Random oversampling for class balance
   - Stacked BiLSTM
   - EarlyStopping + checkpoints
 
-WITH new v4 features:
-  - Pitcher MLBAM ID embeddings (learned representations)
-  - Batter MLBAM ID embeddings
-  - Richer sequence features (pitch physics)
+v5 upgrades:
+  - New inputs: park + catcher embeddings; context now carries arsenal
+    priors, matchup history, batter profiles, TTO, rest days, etc.
+  - METHODOLOGY FIX: split train/val FIRST, then oversample only the
+    training set. (v4 oversampled before splitting, which put duplicate
+    rows in both train and val and inflated validation accuracy.)
+  - Capped oversampling so tiny classes aren't duplicated 100x.
+  - Evaluation runs on the natural (un-oversampled) validation
+    distribution — the honest number.
 
 Requirements:
     pip install tensorflow numpy pandas scikit-learn joblib imbalanced-learn matplotlib
@@ -19,10 +24,10 @@ Usage:
     python 03_train_v4.py
 
 Output:
-    data_v4/final_model_v4.keras
-    data_v4/best_model_v4.keras
-    data_v4/training_curves_v4.png
-    data_v4/training_history_v4.json
+    data_v5/final_model_v5.keras
+    data_v5/best_model_v5.keras
+    data_v5/training_curves_v5.png
+    data_v5/training_history_v5.json
 """
 
 import json
@@ -30,7 +35,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import joblib
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
@@ -40,7 +46,6 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
     Input, Embedding, LSTM, Bidirectional, Dense,
     Dropout, Concatenate, Flatten, BatchNormalization,
-    GlobalAveragePooling1D, MultiHeadAttention, LayerNormalization, Add
 )
 from tensorflow.keras.callbacks import (
     EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
@@ -51,7 +56,7 @@ from tensorflow.keras import backend as K
 # Config
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data_v4"
+DATA_DIR = BASE_DIR / "data_v5"
 
 # Hyperparameters
 EPOCHS = 60
@@ -60,9 +65,11 @@ PATIENCE = 8
 LEARNING_RATE = 1e-3
 
 # Embedding dimensions
-PITCHER_EMBED_DIM = 32   # learned representation per pitcher
-BATTER_EMBED_DIM = 16    # learned representation per batter
-HAND_EMBED_DIM = 4       # handedness embedding
+PITCHER_EMBED_DIM = 32
+BATTER_EMBED_DIM = 16
+HAND_EMBED_DIM = 4
+PARK_EMBED_DIM = 4
+CATCHER_EMBED_DIM = 8
 
 # Model dimensions
 LSTM_UNITS_1 = 128
@@ -74,100 +81,95 @@ DROPOUT_RATE = 0.3
 FOCAL_GAMMA = 2.0
 FOCAL_ALPHA = 1.0
 
+# Oversampling caps: minority classes are boosted to at most
+# MAX_MINORITY_FRACTION of the majority class, and never duplicated
+# more than MAX_DUPLICATION times. Prevents 100x-duplicated rare
+# classes (e.g. knuckleballs) from teaching the model false confidence.
+MAX_MINORITY_FRACTION = 0.4
+MAX_DUPLICATION = 20
+
 # =========================
 # 0) Load metadata + arrays
 # =========================
 print("Loading data...")
-with open(DATA_DIR / "meta_v4.json") as f:
+with open(DATA_DIR / "meta_v5.json") as f:
     meta = json.load(f)
 
-X_seq         = np.load(DATA_DIR / "X_seq.npy")
-X_ctx         = np.load(DATA_DIR / "X_ctx.npy")
-X_pitcher_id  = np.load(DATA_DIR / "X_pitcher_id.npy")
-X_batter_id   = np.load(DATA_DIR / "X_batter_id.npy")
-X_pitcher_hand= np.load(DATA_DIR / "X_pitcher_hand.npy")
+X_seq = np.load(DATA_DIR / "X_seq.npy")
+X_ctx = np.load(DATA_DIR / "X_ctx.npy")
+X_pitcher_id = np.load(DATA_DIR / "X_pitcher_id.npy")
+X_batter_id = np.load(DATA_DIR / "X_batter_id.npy")
+X_pitcher_hand = np.load(DATA_DIR / "X_pitcher_hand.npy")
 X_batter_hand = np.load(DATA_DIR / "X_batter_hand.npy")
-y_labels      = np.load(DATA_DIR / "y_labels.npy")
+X_park_id = np.load(DATA_DIR / "X_park_id.npy")
+X_catcher_id = np.load(DATA_DIR / "X_catcher_id.npy")
+y_labels = np.load(DATA_DIR / "y_labels.npy")
 
 print(f"Samples: {len(y_labels):,}")
 print(f"Seq shape: {X_seq.shape}")
 print(f"Ctx shape: {X_ctx.shape}")
 print(f"Pitcher IDs: {meta['n_pitcher_ids']}, Batter IDs: {meta['n_batter_ids']}")
+print(f"Park IDs: {meta['n_park_ids']}, Catcher IDs: {meta['n_catcher_ids']}")
 print(f"Buckets: {meta['bucket_classes']}")
 
 seq_len = meta["seq_len"]
 seq_feats = meta["seq_feats"]
 ctx_feats = meta["ctx_feats"]
 n_buckets = meta["n_buckets"]
-n_pitcher_ids = meta["n_pitcher_ids"]
-n_batter_ids = meta["n_batter_ids"]
+
+INT_INPUTS = ["pitcher_id", "batter_id", "pitcher_hand", "batter_hand",
+              "park_id", "catcher_id"]
 
 
 # =========================
-# 1) Oversample rare classes
+# 1) Train/val split FIRST (no oversampled duplicates leak into val)
 # =========================
-print("\nOversampling minority classes...")
+print("\nSplitting train/val (80/20, stratified) BEFORE oversampling...")
+indices = np.arange(len(y_labels))
+idx_tr, idx_val = train_test_split(
+    indices, test_size=0.2, random_state=42, stratify=y_labels)
 
-# Flatten all inputs into one array for oversampling
-X_combined = np.concatenate([
-    X_seq.reshape(len(y_labels), -1),       # (N, seq_len * seq_feats)
-    X_ctx,                                   # (N, ctx_feats)
-    X_pitcher_id.reshape(-1, 1),            # (N, 1)
-    X_batter_id.reshape(-1, 1),             # (N, 1)
-    X_pitcher_hand.reshape(-1, 1),          # (N, 1)
-    X_batter_hand.reshape(-1, 1),           # (N, 1)
-], axis=1)
+print(f"Train: {len(idx_tr):,}  Val: {len(idx_val):,}")
 
-ros = RandomOverSampler(random_state=42)
-X_resampled, y_resampled = ros.fit_resample(X_combined, y_labels)
-print(f"After oversampling: {len(y_resampled):,} samples")
 
-# Print new class distribution
+# =========================
+# 2) Oversample the TRAINING set only (capped)
+# =========================
+print("\nOversampling minority classes in the training set...")
+y_tr_orig = y_labels[idx_tr]
+class_counts = np.bincount(y_tr_orig, minlength=n_buckets)
+majority = class_counts.max()
+
+sampling_strategy = {}
+for i in range(n_buckets):
+    if class_counts[i] == 0:
+        continue
+    target = min(int(MAX_MINORITY_FRACTION * majority),
+                 class_counts[i] * MAX_DUPLICATION)
+    sampling_strategy[i] = max(class_counts[i], target)
+
+print("Oversampling targets:")
 for i, cls in enumerate(meta["bucket_classes"]):
-    count = (y_resampled == i).sum()
-    print(f"  {cls}: {count:,}")
+    print(f"  {cls}: {class_counts[i]:,} -> {sampling_strategy.get(i, 0):,}")
 
-# Restore individual arrays from the combined matrix
-idx = 0
-seq_size = seq_len * seq_feats
-X_seq_res = X_resampled[:, idx:idx+seq_size].reshape(-1, seq_len, seq_feats).astype(np.float32)
-idx += seq_size
-
-X_ctx_res = X_resampled[:, idx:idx+ctx_feats].astype(np.float32)
-idx += ctx_feats
-
-X_pitcher_id_res = X_resampled[:, idx].astype(np.int32)
-idx += 1
-
-X_batter_id_res = X_resampled[:, idx].astype(np.int32)
-idx += 1
-
-X_pitcher_hand_res = X_resampled[:, idx].astype(np.int32)
-idx += 1
-
-X_batter_hand_res = X_resampled[:, idx].astype(np.int32)
-idx += 1
+ros = RandomOverSampler(sampling_strategy=sampling_strategy, random_state=42)
+idx_tr_res, y_tr = ros.fit_resample(idx_tr.reshape(-1, 1), y_tr_orig)
+idx_tr_res = idx_tr_res.ravel()
+print(f"Training set after oversampling: {len(y_tr):,}")
 
 
-# =========================
-# 2) Train/val split
-# =========================
-print("\nSplitting train/val (80/20, stratified)...")
-(X_seq_tr, X_seq_val,
- X_ctx_tr, X_ctx_val,
- pid_tr, pid_val,
- bid_tr, bid_val,
- ph_tr, ph_val,
- bh_tr, bh_val,
- y_tr, y_val) = train_test_split(
-    X_seq_res, X_ctx_res,
-    X_pitcher_id_res, X_batter_id_res,
-    X_pitcher_hand_res, X_batter_hand_res,
-    y_resampled,
-    test_size=0.2, random_state=42, stratify=y_resampled
-)
+def gather(idx):
+    return [
+        X_seq[idx], X_ctx[idx],
+        X_pitcher_id[idx], X_batter_id[idx],
+        X_pitcher_hand[idx], X_batter_hand[idx],
+        X_park_id[idx], X_catcher_id[idx],
+    ]
 
-print(f"Train: {len(y_tr):,}  Val: {len(y_val):,}")
+
+train_inputs = gather(idx_tr_res)
+val_inputs = gather(idx_val)
+y_val = y_labels[idx_val]
 
 
 # =========================
@@ -191,54 +193,39 @@ def focal_loss(gamma=FOCAL_GAMMA, alpha=FOCAL_ALPHA):
 # =========================
 print("\nBuilding model...")
 
-# --- Sequence branch (stacked BiLSTM, same as 66% run) ---
+# --- Sequence branch (stacked BiLSTM) ---
 seq_input = Input(shape=(seq_len, seq_feats), name="seq_input")
 s = Bidirectional(LSTM(LSTM_UNITS_1, return_sequences=True))(seq_input)
 s = Dropout(DROPOUT_RATE)(s)
 s = Bidirectional(LSTM(LSTM_UNITS_2, return_sequences=False))(s)
 s = Dropout(DROPOUT_RATE)(s)
 
-# --- Context branch ---
+# --- Context branch (game state + arsenal/matchup/batter priors) ---
 ctx_input = Input(shape=(ctx_feats,), name="ctx_input")
-c = Dense(64, activation="relu")(ctx_input)
+c = Dense(96, activation="relu")(ctx_input)
 c = BatchNormalization()(c)
 c = Dropout(DROPOUT_RATE)(c)
 
-# --- Pitcher ID embedding (NEW in v4) ---
-pitcher_id_input = Input(shape=(1,), name="pitcher_id", dtype="int32")
-pitcher_emb = Embedding(
-    input_dim=n_pitcher_ids,
-    output_dim=PITCHER_EMBED_DIM,
-    name="pitcher_embedding"
-)(pitcher_id_input)
-pitcher_emb = Flatten()(pitcher_emb)
+# --- Identity embeddings ---
+def embed_branch(name, n_ids, dim):
+    inp = Input(shape=(1,), name=name, dtype="int32")
+    emb = Embedding(input_dim=n_ids, output_dim=dim,
+                    name=f"{name}_embedding")(inp)
+    return inp, Flatten()(emb)
 
-# --- Batter ID embedding (NEW in v4) ---
-batter_id_input = Input(shape=(1,), name="batter_id", dtype="int32")
-batter_emb = Embedding(
-    input_dim=n_batter_ids,
-    output_dim=BATTER_EMBED_DIM,
-    name="batter_embedding"
-)(batter_id_input)
-batter_emb = Flatten()(batter_emb)
-
-# --- Handedness embeddings ---
-pitcher_hand_input = Input(shape=(1,), name="pitcher_hand", dtype="int32")
-pitcher_hand_emb = Embedding(input_dim=2, output_dim=HAND_EMBED_DIM)(pitcher_hand_input)
-pitcher_hand_emb = Flatten()(pitcher_hand_emb)
-
-batter_hand_input = Input(shape=(1,), name="batter_hand", dtype="int32")
-batter_hand_emb = Embedding(input_dim=3, output_dim=HAND_EMBED_DIM)(batter_hand_input)
-batter_hand_emb = Flatten()(batter_hand_emb)
+pitcher_id_input, pitcher_emb = embed_branch("pitcher_id", meta["n_pitcher_ids"], PITCHER_EMBED_DIM)
+batter_id_input, batter_emb = embed_branch("batter_id", meta["n_batter_ids"], BATTER_EMBED_DIM)
+pitcher_hand_input, pitcher_hand_emb = embed_branch("pitcher_hand", 2, HAND_EMBED_DIM)
+batter_hand_input, batter_hand_emb = embed_branch("batter_hand", 3, HAND_EMBED_DIM)
+park_id_input, park_emb = embed_branch("park_id", meta["n_park_ids"], PARK_EMBED_DIM)
+catcher_id_input, catcher_emb = embed_branch("catcher_id", meta["n_catcher_ids"], CATCHER_EMBED_DIM)
 
 # --- Merge everything ---
 combined = Concatenate()([
-    s,                  # sequence encoding
-    c,                  # context
-    pitcher_emb,        # who is pitching
-    batter_emb,         # who is batting
-    pitcher_hand_emb,   # pitcher handedness
-    batter_hand_emb,    # batter handedness
+    s, c,
+    pitcher_emb, batter_emb,
+    pitcher_hand_emb, batter_hand_emb,
+    park_emb, catcher_emb,
 ])
 
 z = Dense(DENSE_UNITS, activation="relu")(combined)
@@ -252,12 +239,12 @@ model = Model(
     inputs=[
         seq_input, ctx_input,
         pitcher_id_input, batter_id_input,
-        pitcher_hand_input, batter_hand_input
+        pitcher_hand_input, batter_hand_input,
+        park_id_input, catcher_id_input,
     ],
     outputs=output
 )
 
-# Compile with focal loss
 optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
 model.compile(optimizer=optimizer, loss=focal_loss(), metrics=["accuracy"])
 model.summary()
@@ -268,13 +255,13 @@ model.summary()
 # =========================
 callbacks = [
     ModelCheckpoint(
-        str(DATA_DIR / "best_model_v4.keras"),
+        str(DATA_DIR / "best_model_v5.keras"),
         monitor="val_loss",
         save_best_only=True,
         verbose=1
     ),
     ModelCheckpoint(
-        str(DATA_DIR / "final_model_v4.keras"),
+        str(DATA_DIR / "final_model_v5.keras"),
         save_best_only=False
     ),
     EarlyStopping(
@@ -298,12 +285,8 @@ callbacks = [
 # =========================
 print(f"\nTraining for up to {EPOCHS} epochs...")
 print(f"Focal loss: gamma={FOCAL_GAMMA}, alpha={FOCAL_ALPHA}")
-print(f"Oversampled: yes")
 print(f"Batch size: {BATCH_SIZE}")
 print(f"Early stopping patience: {PATIENCE}")
-
-train_inputs = [X_seq_tr, X_ctx_tr, pid_tr, bid_tr, ph_tr, bh_tr]
-val_inputs   = [X_seq_val, X_ctx_val, pid_val, bid_val, ph_val, bh_val]
 
 history = model.fit(
     train_inputs, y_tr,
@@ -316,32 +299,28 @@ history = model.fit(
 
 
 # =========================
-# 7) Evaluate
+# 7) Evaluate — on the NATURAL validation distribution
 # =========================
-print("\n" + "="*50)
-print("EVALUATION")
-print("="*50)
+print("\n" + "=" * 50)
+print("EVALUATION (natural distribution, no oversampled duplicates)")
+print("=" * 50)
 
-# Predictions on validation set
 y_pred_probs = model.predict(val_inputs, verbose=0)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
 print("\nClassification Report:")
 print(classification_report(
     y_val, y_pred,
+    labels=list(range(n_buckets)),
     target_names=meta["bucket_classes"],
-    digits=3
+    digits=3,
+    zero_division=0,
 ))
 
 print("\nConfusion Matrix:")
-cm = confusion_matrix(y_val, y_pred)
-print(pd.DataFrame(
-    cm,
-    index=meta["bucket_classes"],
-    columns=meta["bucket_classes"]
-))
+cm = confusion_matrix(y_val, y_pred, labels=list(range(n_buckets)))
+print(pd.DataFrame(cm, index=meta["bucket_classes"], columns=meta["bucket_classes"]))
 
-# Per-class accuracy (critical check: make sure we're not just predicting one class!)
 print("\nPer-class accuracy:")
 for i, cls in enumerate(meta["bucket_classes"]):
     mask = y_val == i
@@ -349,9 +328,14 @@ for i, cls in enumerate(meta["bucket_classes"]):
         acc = (y_pred[mask] == i).mean()
         print(f"  {cls}: {acc:.1%} ({mask.sum():,} samples)")
 
+# Top-2 accuracy — useful for the website ("most likely / second guess")
+top2 = np.argsort(y_pred_probs, axis=1)[:, -2:]
+top2_acc = np.mean([(y_val[i] in top2[i]) for i in range(len(y_val))])
+print(f"\nTop-2 accuracy: {top2_acc:.1%}")
+
 
 # =========================
-# 8) Save training curves
+# 8) Save training curves + history
 # =========================
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -370,15 +354,13 @@ ax2.set_title("Loss")
 ax2.legend()
 
 plt.tight_layout()
-plt.savefig(str(DATA_DIR / "training_curves_v4.png"), dpi=300)
-plt.show()
-print(f"Training curves saved to {DATA_DIR / 'training_curves_v4.png'}")
+plt.savefig(str(DATA_DIR / "training_curves_v5.png"), dpi=300)
+print(f"Training curves saved to {DATA_DIR / 'training_curves_v5.png'}")
 
-# Save history
 hist_dict = {k: [float(v) for v in vals] for k, vals in history.history.items()}
-with open(DATA_DIR / "training_history_v4.json", "w") as f:
+with open(DATA_DIR / "training_history_v5.json", "w") as f:
     json.dump(hist_dict, f, indent=2)
 
 print("\nDone!")
-print(f"Best model: {DATA_DIR / 'best_model_v4.keras'}")
-print(f"Final model: {DATA_DIR / 'final_model_v4.keras'}")
+print(f"Best model: {DATA_DIR / 'best_model_v5.keras'}")
+print(f"Final model: {DATA_DIR / 'final_model_v5.keras'}")
