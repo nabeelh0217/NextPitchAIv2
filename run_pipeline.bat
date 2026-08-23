@@ -80,7 +80,22 @@ echo Using Python:
 %PYEXE% --version
 
 REM ---- 2. Virtual environment ----
-if not exist ".venv\Scripts\python.exe" (
+REM A .venv left over from an earlier failed run (created before this
+REM script picked a compatible Python) would otherwise be silently reused.
+REM Validate it and rebuild if it's missing or incompatible.
+set REBUILD_VENV=0
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info[:2] in [(3,10),(3,11),(3,12),(3,13)] else 1)" >nul 2>nul
+    if errorlevel 1 set REBUILD_VENV=1
+) else (
+    set REBUILD_VENV=1
+)
+
+if %REBUILD_VENV%==1 (
+    if exist ".venv" (
+        echo Existing .venv is missing or incompatible — rebuilding...
+        rmdir /s /q .venv
+    )
     echo Creating virtual environment .venv ...
     %PYEXE% -m venv .venv
     if errorlevel 1 (
