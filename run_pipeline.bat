@@ -27,25 +27,62 @@ echo ============================================
 echo  NextPitchAI v5 pipeline
 echo ============================================
 
-REM ---- 1. Find Python ----
-where python >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Python not found on PATH.
-    echo Install Python 3.10+ from https://www.python.org/downloads/
-    echo and check "Add python.exe to PATH" during install.
+REM ---- 1. Find a TensorFlow-compatible Python (3.10 - 3.13) ----
+REM TensorFlow does not publish wheels for every Python release — if your
+REM default "python" is newer than TensorFlow supports (e.g. 3.14+), pip
+REM install fails with "No matching distribution found for tensorflow".
+REM We use the Windows "py" launcher (installed by default with python.org
+REM installers) to find an already-installed compatible version, so you
+REM don't need to change your default python/PATH.
+set PYEXE=
+
+where py >nul 2>nul
+if not errorlevel 1 (
+    for %%V in (3.13 3.12 3.11 3.10) do (
+        if not defined PYEXE (
+            py -%%V -c "exit()" >nul 2>nul
+            if not errorlevel 1 set PYEXE=py -%%V
+        )
+    )
+)
+
+if not defined PYEXE (
+    where python >nul 2>nul
+    if not errorlevel 1 (
+        python -c "import sys; sys.exit(0 if sys.version_info[:2] in [(3,10),(3,11),(3,12),(3,13)] else 1)" >nul 2>nul
+        if not errorlevel 1 set PYEXE=python
+    )
+)
+
+if not defined PYEXE (
+    echo ERROR: No TensorFlow-compatible Python found ^(need 3.10, 3.11, 3.12, or 3.13^).
+    echo.
+    where python >nul 2>nul
+    if not errorlevel 1 (
+        echo Your default "python" is:
+        python --version
+        echo.
+    ) else (
+        echo No "python" was found on PATH either.
+        echo.
+    )
+    echo TensorFlow does not support newer Python versions yet on Windows.
+    echo Install Python 3.12 from:
+    echo   https://www.python.org/downloads/release/python-3120/
+    echo During install, keep "Install launcher for all users" / "py launcher"
+    echo checked ^(it's on by default^) — you do NOT need to change your
+    echo default python or PATH. Re-run this script afterward and it will
+    echo find and use 3.12 automatically via the py launcher.
     goto :fail
 )
-python -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"
-if errorlevel 1 (
-    echo ERROR: Python 3.10 or newer is required.
-    python --version
-    goto :fail
-)
+
+echo Using Python:
+%PYEXE% --version
 
 REM ---- 2. Virtual environment ----
 if not exist ".venv\Scripts\python.exe" (
     echo Creating virtual environment .venv ...
-    python -m venv .venv
+    %PYEXE% -m venv .venv
     if errorlevel 1 (
         echo ERROR: could not create virtual environment.
         goto :fail
