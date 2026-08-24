@@ -65,19 +65,18 @@ WHIFF_SMOOTHING = 20.0      # toward league whiff rate per bucket
 # v5 drops the "other" bucket entirely (pitchouts, intentional balls,
 # unknowns) — they are not real pitch-selection decisions and only add
 # label noise.
-# The cutter (FC) is grouped with breaking balls, not fastballs: it has
-# fastball-like velocity but slider-like glove-side break, and grouping
-# it with true fastballs polluted that class's movement signal (the
-# first v5 run's #1 confusion pair was breaking<->fastball).
+# Cutter (FC) stays in the fastball group: classifying it as breaking
+# was tried (run 2) and measurably hurt — accuracy -2.5pts, top-2 -1pt,
+# and the breaking<->fastball confusion pair grew. Don't re-attempt.
 PITCH_TO_BUCKET = {
     # Fastballs
     "FF": "fastball",   # four-seam
     "FT": "fastball",   # two-seam (older code)
     "SI": "fastball",   # sinker
+    "FC": "fastball",   # cutter
     "FA": "fastball",   # generic fastball
 
     # Breaking
-    "FC": "breaking",   # cutter
     "SL": "breaking",   # slider
     "CU": "breaking",   # curveball
     "KC": "breaking",   # knuckle-curve
@@ -259,30 +258,35 @@ def build_pitch_features(df: pd.DataFrame, bucket_idx: np.ndarray) -> np.ndarray
     return feats
 
 
-def build_sequences(pitch_feats: np.ndarray, game_ids: np.ndarray,
-                    ab_ids: np.ndarray, seq_len: int) -> np.ndarray:
+def build_sequences(pitch_feats: np.ndarray, df: pd.DataFrame,
+                    seq_len: int) -> np.ndarray:
     """
-    (N, seq_len, F+1) sequences of the previous pitches in the same game.
+    (N, seq_len, F+1) sequences of the previous pitches thrown by the
+    SAME PITCHER in the same game. Rows in the raw data are chronological
+    across the whole game, so a naive "previous N rows" lookback (the v4
+    approach) mostly captures the OPPOSING pitcher's pitches around
+    half-inning changes — noise, not this pitcher's sequencing. Grouping
+    by (game, pitcher) gives the model the current pitcher's actual
+    recent pattern.
+
     The extra final feature per timestep is a same-at-bat flag so the
     model can tell "earlier this at-bat" from "earlier this game".
-    Cross-game boundaries are zero-padded.
+    A pitcher's first pitches of a game are zero-padded.
     """
     N, F = pitch_feats.shape
     sequences = np.zeros((N, seq_len, F + 1), dtype=np.float32)
+    ab_vals = df["at_bat_number"].values
 
-    for i in range(N):
-        lookback = []
-        for j in range(1, seq_len + 1):
-            idx = i - j
-            if idx < 0 or game_ids[idx] != game_ids[i]:
-                break
-            lookback.append(idx)
-
-        lookback.reverse()
-        start = seq_len - len(lookback)
-        for k, idx in enumerate(lookback):
-            sequences[i, start + k, :F] = pitch_feats[idx]
-            sequences[i, start + k, F] = 1.0 if ab_ids[idx] == ab_ids[i] else 0.0
+    groups = df.groupby(["game_pk", "pitcher"], sort=False).indices
+    for idxs in groups.values():
+        # idxs are ascending positions (df is chronologically sorted)
+        for pos, i in enumerate(idxs):
+            prev = idxs[max(0, pos - seq_len):pos]
+            if len(prev) == 0:
+                continue
+            start = seq_len - len(prev)
+            sequences[i, start:, :F] = pitch_feats[prev]
+            sequences[i, start:, F] = (ab_vals[prev] == ab_vals[i]).astype(np.float32)
 
     return sequences
 
@@ -427,10 +431,7 @@ def main():
     pitch_feats[:, N_BUCKETS:] = seq_scaler.fit_transform(continuous).astype(np.float32)
 
     print(f"Building sequences of length {SEQ_LEN} (this may take a few minutes)...")
-    X_seq = build_sequences(pitch_feats,
-                            df["game_pk"].values,
-                            df["at_bat_number"].values,
-                            SEQ_LEN)
+    X_seq = build_sequences(pitch_feats, df, SEQ_LEN)
     print(f"Sequence shape: {X_seq.shape}")
 
     # ---------------------------
