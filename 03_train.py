@@ -86,7 +86,7 @@ FOCAL_ALPHA = 1.0
 # more than MAX_DUPLICATION times. Prevents 100x-duplicated rare
 # classes (e.g. knuckleballs) from teaching the model false confidence.
 MAX_MINORITY_FRACTION = 0.4
-MAX_DUPLICATION = 20
+MAX_DUPLICATION = 8
 
 # =========================
 # 0) Load metadata + arrays

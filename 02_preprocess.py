@@ -65,15 +65,19 @@ WHIFF_SMOOTHING = 20.0      # toward league whiff rate per bucket
 # v5 drops the "other" bucket entirely (pitchouts, intentional balls,
 # unknowns) — they are not real pitch-selection decisions and only add
 # label noise.
+# The cutter (FC) is grouped with breaking balls, not fastballs: it has
+# fastball-like velocity but slider-like glove-side break, and grouping
+# it with true fastballs polluted that class's movement signal (the
+# first v5 run's #1 confusion pair was breaking<->fastball).
 PITCH_TO_BUCKET = {
     # Fastballs
     "FF": "fastball",   # four-seam
     "FT": "fastball",   # two-seam (older code)
     "SI": "fastball",   # sinker
-    "FC": "fastball",   # cutter
     "FA": "fastball",   # generic fastball
 
     # Breaking
+    "FC": "breaking",   # cutter
     "SL": "breaking",   # slider
     "CU": "breaking",   # curveball
     "KC": "breaking",   # knuckle-curve
