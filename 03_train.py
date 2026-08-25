@@ -1,27 +1,26 @@
 """
-NextPitchAI v5 — Step 3: Train model
+NextPitchAI v6 — Step 3: Train model
 ======================================
-Keeps the proven training strategy from the 66% run:
-  - Focal loss (gamma=2)
-  - Random oversampling for class balance
-  - Stacked BiLSTM
-  - EarlyStopping + checkpoints
+Predicts the ACTUAL pitch type (10 canonical Statcast classes) with the
+pitcher's arsenal enforced INSIDE the model: a binary mask input forces
+the logits of pitch types this pitcher never throws to -inf before the
+softmax, in training and at inference. The model spends all of its
+capacity discriminating within each pitcher's real repertoire.
 
-v5 upgrades:
-  - New inputs: park + catcher embeddings; context now carries arsenal
-    priors, matchup history, batter profiles, TTO, rest days, etc.
-  - METHODOLOGY FIX: split train/val FIRST, then oversample only the
-    training set. (v4 oversampled before splitting, which put duplicate
-    rows in both train and val and inflated validation accuracy.)
-  - Capped oversampling so tiny classes aren't duplicated 100x.
-  - Evaluation runs on the natural (un-oversampled) validation
-    distribution — the honest number.
+Training strategy:
+  - Class-weighted focal loss (gamma=2, per-class alpha from natural
+    frequencies). Replaces physical row duplication (RandomOverSampler),
+    which the run-4 training curves showed drives early memorization.
+  - Stacked BiLSTM over this pitcher's last 8 pitches
+  - Embeddings: pitcher, batter, catcher, park, handedness
+  - Train/val split BEFORE any resampling; evaluation on the natural
+    distribution.
 
 Requirements:
-    pip install tensorflow numpy pandas scikit-learn joblib imbalanced-learn matplotlib
+    pip install tensorflow numpy pandas scikit-learn joblib matplotlib
 
 Usage:
-    python 03_train_v4.py
+    python 03_train.py
 
 Output:
     data_v5/final_model_v5.keras
@@ -40,12 +39,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
-from imblearn.over_sampling import RandomOverSampler
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
     Input, Embedding, LSTM, Bidirectional, Dense,
-    Dropout, Concatenate, Flatten, BatchNormalization,
+    Dropout, Concatenate, Flatten, BatchNormalization, Activation,
 )
 from tensorflow.keras.callbacks import (
     EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
@@ -77,20 +75,9 @@ LSTM_UNITS_2 = 64
 DENSE_UNITS = 128
 DROPOUT_RATE = 0.3
 
-# Focal loss params (proven from 66% run)
+# Focal loss
 FOCAL_GAMMA = 2.0
-FOCAL_ALPHA = 1.0
-
-# Oversampling caps: minority classes are boosted to at most
-# MAX_MINORITY_FRACTION of the majority class, and never duplicated
-# more than MAX_DUPLICATION times. Prevents 100x-duplicated rare
-# classes (e.g. knuckleballs) from teaching the model false confidence.
-# 0.75 (not 0.4): at 0.4 the cap sat BELOW breaking's natural count, so
-# the second-largest class got zero oversampling and its recall collapsed
-# to 28.9% (run 3) while fastball recall climbed — the model just leaned
-# into the 1.8:1 majority imbalance.
-MAX_MINORITY_FRACTION = 0.75
-MAX_DUPLICATION = 8
+ALPHA_CAP = 4.0  # max per-class weight (protects vs ultra-rare classes)
 
 # =========================
 # 0) Load metadata + arrays
@@ -107,59 +94,31 @@ X_pitcher_hand = np.load(DATA_DIR / "X_pitcher_hand.npy")
 X_batter_hand = np.load(DATA_DIR / "X_batter_hand.npy")
 X_park_id = np.load(DATA_DIR / "X_park_id.npy")
 X_catcher_id = np.load(DATA_DIR / "X_catcher_id.npy")
+X_arsenal_mask = np.load(DATA_DIR / "X_arsenal_mask.npy")
 y_labels = np.load(DATA_DIR / "y_labels.npy")
 
 print(f"Samples: {len(y_labels):,}")
 print(f"Seq shape: {X_seq.shape}")
 print(f"Ctx shape: {X_ctx.shape}")
-print(f"Pitcher IDs: {meta['n_pitcher_ids']}, Batter IDs: {meta['n_batter_ids']}")
-print(f"Park IDs: {meta['n_park_ids']}, Catcher IDs: {meta['n_catcher_ids']}")
-print(f"Buckets: {meta['bucket_classes']}")
+print(f"Arsenal mask shape: {X_arsenal_mask.shape} "
+      f"(avg arsenal size {X_arsenal_mask.sum(axis=1).mean():.2f})")
+print(f"Pitch classes: {meta['pitch_classes']}")
 
 seq_len = meta["seq_len"]
 seq_feats = meta["seq_feats"]
 ctx_feats = meta["ctx_feats"]
-n_buckets = meta["n_buckets"]
-
-INT_INPUTS = ["pitcher_id", "batter_id", "pitcher_hand", "batter_hand",
-              "park_id", "catcher_id"]
+n_pitch = meta["n_pitch_types"]
+pitch_classes = meta["pitch_classes"]
 
 
 # =========================
-# 1) Train/val split FIRST (no oversampled duplicates leak into val)
+# 1) Train/val split (natural distribution; no resampling anywhere)
 # =========================
-print("\nSplitting train/val (80/20, stratified) BEFORE oversampling...")
+print("\nSplitting train/val (80/20, stratified)...")
 indices = np.arange(len(y_labels))
 idx_tr, idx_val = train_test_split(
     indices, test_size=0.2, random_state=42, stratify=y_labels)
-
 print(f"Train: {len(idx_tr):,}  Val: {len(idx_val):,}")
-
-
-# =========================
-# 2) Oversample the TRAINING set only (capped)
-# =========================
-print("\nOversampling minority classes in the training set...")
-y_tr_orig = y_labels[idx_tr]
-class_counts = np.bincount(y_tr_orig, minlength=n_buckets)
-majority = class_counts.max()
-
-sampling_strategy = {}
-for i in range(n_buckets):
-    if class_counts[i] == 0:
-        continue
-    target = min(int(MAX_MINORITY_FRACTION * majority),
-                 class_counts[i] * MAX_DUPLICATION)
-    sampling_strategy[i] = max(class_counts[i], target)
-
-print("Oversampling targets:")
-for i, cls in enumerate(meta["bucket_classes"]):
-    print(f"  {cls}: {class_counts[i]:,} -> {sampling_strategy.get(i, 0):,}")
-
-ros = RandomOverSampler(sampling_strategy=sampling_strategy, random_state=42)
-idx_tr_res, y_tr = ros.fit_resample(idx_tr.reshape(-1, 1), y_tr_orig)
-idx_tr_res = idx_tr_res.ravel()
-print(f"Training set after oversampling: {len(y_tr):,}")
 
 
 def gather(idx):
@@ -168,36 +127,53 @@ def gather(idx):
         X_pitcher_id[idx], X_batter_id[idx],
         X_pitcher_hand[idx], X_batter_hand[idx],
         X_park_id[idx], X_catcher_id[idx],
+        X_arsenal_mask[idx],
     ]
 
 
-train_inputs = gather(idx_tr_res)
+train_inputs = gather(idx_tr)
 val_inputs = gather(idx_val)
+y_tr = y_labels[idx_tr]
 y_val = y_labels[idx_val]
 
 
 # =========================
-# 3) Focal loss (proven from 66% run)
+# 2) Class-weighted focal loss
 # =========================
-def focal_loss(gamma=FOCAL_GAMMA, alpha=FOCAL_ALPHA):
+# Per-class alpha from natural training frequencies: inverse-sqrt
+# frequency, normalized to mean 1, capped. Gradient-level rebalancing
+# with zero duplicated rows to memorize (run 4's curves showed physical
+# oversampling drove val loss up from ~epoch 5).
+counts = np.maximum(np.bincount(y_tr, minlength=n_pitch), 1)
+raw_alpha = (len(y_tr) / (n_pitch * counts)) ** 0.5
+class_alpha = np.minimum(raw_alpha / raw_alpha.mean(), ALPHA_CAP).astype(np.float32)
+
+print("\nClass weights (focal alpha):")
+for i, cls in enumerate(pitch_classes):
+    print(f"  {cls}: n={counts[i]:,}  alpha={class_alpha[i]:.3f}")
+
+
+def focal_loss(gamma=FOCAL_GAMMA, alpha_vec=class_alpha):
+    alpha_const = tf.constant(alpha_vec, dtype=tf.float32)
+
     def focal_loss_fn(y_true, y_pred):
         y_true = tf.cast(y_true, tf.int32)
         y_true = tf.one_hot(y_true, depth=tf.shape(y_pred)[-1])
         y_pred = tf.clip_by_value(y_pred, K.epsilon(), 1 - K.epsilon())
 
         cross_entropy = -y_true * tf.math.log(y_pred)
-        weights = alpha * tf.pow(1 - y_pred, gamma)
+        weights = alpha_const * tf.pow(1 - y_pred, gamma)
         loss = tf.reduce_sum(weights * cross_entropy, axis=-1)
         return tf.reduce_mean(loss)
     return focal_loss_fn
 
 
 # =========================
-# 4) Build model
+# 3) Build model
 # =========================
 print("\nBuilding model...")
 
-# --- Sequence branch (stacked BiLSTM) ---
+# --- Sequence branch (stacked BiLSTM over this pitcher's last pitches) ---
 seq_input = Input(shape=(seq_len, seq_feats), name="seq_input")
 s = Bidirectional(LSTM(LSTM_UNITS_1, return_sequences=True))(seq_input)
 s = Dropout(DROPOUT_RATE)(s)
@@ -224,6 +200,9 @@ batter_hand_input, batter_hand_emb = embed_branch("batter_hand", 3, HAND_EMBED_D
 park_id_input, park_emb = embed_branch("park_id", meta["n_park_ids"], PARK_EMBED_DIM)
 catcher_id_input, catcher_emb = embed_branch("catcher_id", meta["n_catcher_ids"], CATCHER_EMBED_DIM)
 
+# --- Arsenal mask input ---
+mask_input = Input(shape=(n_pitch,), name="arsenal_mask")
+
 # --- Merge everything ---
 combined = Concatenate()([
     s, c,
@@ -237,7 +216,14 @@ z = BatchNormalization()(z)
 z = Dropout(DROPOUT_RATE)(z)
 z = Dense(64, activation="relu")(z)
 z = Dropout(0.2)(z)
-output = Dense(n_buckets, activation="softmax", name="output")(z)
+
+# Arsenal-masked softmax: pitch types outside this pitcher's repertoire
+# get their logits pushed to -inf, so they receive ~zero probability and
+# contribute nothing to the loss. All discrimination happens within the
+# pitcher's actual arsenal.
+logits = Dense(n_pitch, name="logits")(z)
+masked_logits = logits + (1.0 - mask_input) * -1e9
+output = Activation("softmax", name="output")(masked_logits)
 
 model = Model(
     inputs=[
@@ -245,6 +231,7 @@ model = Model(
         pitcher_id_input, batter_id_input,
         pitcher_hand_input, batter_hand_input,
         park_id_input, catcher_id_input,
+        mask_input,
     ],
     outputs=output
 )
@@ -255,7 +242,7 @@ model.summary()
 
 
 # =========================
-# 5) Callbacks
+# 4) Callbacks
 # =========================
 callbacks = [
     ModelCheckpoint(
@@ -285,10 +272,10 @@ callbacks = [
 
 
 # =========================
-# 6) Train
+# 5) Train
 # =========================
 print(f"\nTraining for up to {EPOCHS} epochs...")
-print(f"Focal loss: gamma={FOCAL_GAMMA}, alpha={FOCAL_ALPHA}")
+print(f"Focal loss: gamma={FOCAL_GAMMA}, per-class alpha (printed above)")
 print(f"Batch size: {BATCH_SIZE}")
 print(f"Early stopping patience: {PATIENCE}")
 
@@ -303,43 +290,60 @@ history = model.fit(
 
 
 # =========================
-# 7) Evaluate — on the NATURAL validation distribution
+# 6) Evaluate — natural distribution
 # =========================
 print("\n" + "=" * 50)
-print("EVALUATION (natural distribution, no oversampled duplicates)")
+print("EVALUATION (natural distribution)")
 print("=" * 50)
 
 y_pred_probs = model.predict(val_inputs, verbose=0)
 y_pred = np.argmax(y_pred_probs, axis=1)
 
+top1 = (y_pred == y_val).mean()
+order = np.argsort(y_pred_probs, axis=1)
+top3 = np.mean([(y_val[i] in order[i, -3:]) for i in range(len(y_val))])
+
+# Baseline: always predict this pitcher's most common pitch type
+# (computed from TRAINING rows only; UNK pitchers -> global mode).
+tr_df = pd.DataFrame({"pid": X_pitcher_id[idx_tr], "y": y_tr})
+mode_by_pid = tr_df.groupby("pid")["y"].agg(lambda s: s.value_counts().idxmax())
+global_mode = int(tr_df["y"].value_counts().idxmax())
+baseline_pred = np.array([
+    mode_by_pid.get(pid, global_mode) for pid in X_pitcher_id[idx_val]
+])
+baseline_acc = (baseline_pred == y_val).mean()
+
+print(f"\nTop-1 accuracy: {top1:.1%}")
+print(f"Top-3 accuracy: {top3:.1%}")
+print(f"Baseline (pitcher's most common pitch): {baseline_acc:.1%}")
+print(f"Lift over baseline: {top1 - baseline_acc:+.1%}")
+
+present = sorted(set(y_val.tolist()) | set(y_pred.tolist()))
+present_names = [pitch_classes[i] for i in present]
+
 print("\nClassification Report:")
 print(classification_report(
     y_val, y_pred,
-    labels=list(range(n_buckets)),
-    target_names=meta["bucket_classes"],
+    labels=present,
+    target_names=present_names,
     digits=3,
     zero_division=0,
 ))
 
 print("\nConfusion Matrix:")
-cm = confusion_matrix(y_val, y_pred, labels=list(range(n_buckets)))
-print(pd.DataFrame(cm, index=meta["bucket_classes"], columns=meta["bucket_classes"]))
+cm = confusion_matrix(y_val, y_pred, labels=present)
+print(pd.DataFrame(cm, index=present_names, columns=present_names))
 
 print("\nPer-class accuracy:")
-for i, cls in enumerate(meta["bucket_classes"]):
+for i in present:
     mask = y_val == i
     if mask.sum() > 0:
         acc = (y_pred[mask] == i).mean()
-        print(f"  {cls}: {acc:.1%} ({mask.sum():,} samples)")
-
-# Top-2 accuracy — useful for the website ("most likely / second guess")
-top2 = np.argsort(y_pred_probs, axis=1)[:, -2:]
-top2_acc = np.mean([(y_val[i] in top2[i]) for i in range(len(y_val))])
-print(f"\nTop-2 accuracy: {top2_acc:.1%}")
+        print(f"  {pitch_classes[i]}: {acc:.1%} ({mask.sum():,} samples)")
 
 
 # =========================
-# 8) Save training curves + history
+# 7) Save training curves + history
 # =========================
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
