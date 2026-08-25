@@ -85,7 +85,11 @@ FOCAL_ALPHA = 1.0
 # MAX_MINORITY_FRACTION of the majority class, and never duplicated
 # more than MAX_DUPLICATION times. Prevents 100x-duplicated rare
 # classes (e.g. knuckleballs) from teaching the model false confidence.
-MAX_MINORITY_FRACTION = 0.4
+# 0.75 (not 0.4): at 0.4 the cap sat BELOW breaking's natural count, so
+# the second-largest class got zero oversampling and its recall collapsed
+# to 28.9% (run 3) while fastball recall climbed — the model just leaned
+# into the 1.8:1 majority imbalance.
+MAX_MINORITY_FRACTION = 0.75
 MAX_DUPLICATION = 8
 
 # =========================
