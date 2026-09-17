@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "NextPitchAI: Setup environment",
+      "detail": "Find a TensorFlow-compatible Python, create .venv, install dependencies",
+      "type": "shell",
+      "command": "./run_pipeline.sh --setup-only",
+      "windows": { "command": "run_pipeline.bat" },
+      "problemMatcher": []
+    },
+    {
+      "label": "NextPitchAI: 1 - Scrape Statcast",
+      "detail": "~30-90 min. Pulls 2022-2024 pitches -> statcast_raw_v5.parquet",
+      "type": "shell",
+      "command": ".venv/bin/python 01_scrape_statcast.py",
+      "windows": { "command": ".venv\\Scripts\\python.exe 01_scrape_statcast.py" },
+      "problemMatcher": []
+    },
+    {
+      "label": "NextPitchAI: 2 - Preprocess",
+      "detail": "~5-15 min. Builds data_v5/ arrays + artifacts from the parquet",
+      "type": "shell",
+      "command": ".venv/bin/python 02_preprocess.py",
+      "windows": { "command": ".venv\\Scripts\\python.exe 02_preprocess.py" },
+      "problemMatcher": []
+    },
+    {
+      "label": "NextPitchAI: 3 - Train",
+      "detail": "Trains the model, prints the evaluation report, saves curves",
+      "type": "shell",
+      "command": ".venv/bin/python 03_train.py",
+      "windows": { "command": ".venv\\Scripts\\python.exe 03_train.py" },
+      "problemMatcher": []
+    },
+    {
+      "label": "NextPitchAI: Full pipeline",
+      "detail": "Scrape -> preprocess -> train, skipping steps already done",
+      "type": "shell",
+      "command": "./run_pipeline.sh",
+      "windows": { "command": "run_pipeline.bat" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "NextPitchAI: Rebuild preprocessing + retrain",
+      "detail": "Keeps the parquet, deletes data_v5/, re-runs preprocess and train",
+      "type": "shell",
+      "command": "./run_pipeline.sh --fresh-preprocess",
+      "windows": { "command": "rmdir /s /q data_v5 & run_pipeline.bat" },
+      "problemMatcher": []
+    }
+  ]
+}

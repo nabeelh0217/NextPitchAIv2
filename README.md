@@ -6,17 +6,43 @@ from MLB Statcast data using a BiLSTM + embeddings model whose softmax is
 pitches the pitcher really throws. Continuation of NextPitchAI, revamped
 for full-scale release.
 
-## Quick start (Windows)
+## Quick start
+
+### macOS / Linux
+
+```bash
+./run_pipeline.sh                     # everything, skipping steps already done
+./run_pipeline.sh --fresh-preprocess  # keep the parquet; rebuild data_v5/ + retrain
+./run_pipeline.sh --fresh             # redo all, including the 30-90 min scrape
+./run_pipeline.sh --setup-only        # just create .venv + install deps
+```
+
+The script finds a TensorFlow-compatible Python (3.10–3.13) automatically,
+manages `.venv`, and validates each artifact before trusting it. If it
+reports no compatible Python: `brew install python@3.12` and re-run.
+
+Apple Silicon notes: the standard `tensorflow` wheel is native arm64 —
+nothing extra is needed. `tensorflow-metal` (GPU plugin) is deliberately
+not installed because it has a history of LSTM bugs; add it yourself if you
+want to experiment. A fanless MacBook Air will thermally throttle during
+training — plug it in and expect 30–90+ minutes.
+
+### Windows
 
 Double-click `run_pipeline.bat` (or run it from a Command Prompt in the
-repo folder). It creates a virtual environment, installs dependencies,
-and runs all three steps in order. Steps whose output already exists are
-skipped, so a re-run after a failure picks up where it left off:
+repo folder). Same behavior as the shell script:
 
 ```bat
 run_pipeline.bat            :: run everything (skip completed steps)
 run_pipeline.bat --fresh    :: force re-run of every step
 ```
+
+### Cursor / VS Code
+
+`.vscode/tasks.json` exposes each step as a task (Terminal → Run Task →
+"NextPitchAI: …"), and the interpreter is pinned to `.venv`. Project
+context for the AI agent lives in `AGENTS.md` and `.cursor/rules/`; the
+training history is in `docs/EXPERIMENTS.md`.
 
 ## Pipeline (v6)
 

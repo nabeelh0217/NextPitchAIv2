@@ -17,4 +17,4 @@ venv/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+# .vscode/ is tracked on purpose: tasks.json + settings.json are the Cursor workflow
