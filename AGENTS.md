@@ -86,16 +86,17 @@ features do anything at all**. 10-class top-1 reads lower than the old
 
 - **Run 5 (first real v6 training): top-1 44.0%, top-3 91.3%, baseline
   42.8%, lift +1.2%.** Training dynamics were healthy (28 epochs, best
-  val_loss at 20, no overfitting), but `ALPHA_POWER=0.5` stacked a 17:1
-  class-weight ratio on top of focal gamma=2 and wrecked the majority
-  class (FF recall 30% at precision 64%). See `docs/EXPERIMENTS.md`.
-- **Run 6 is queued**: `ALPHA_POWER` set to 0.0 (uniform), plus the
-  log-loss baseline comparison. Retrain with
-  `./run_pipeline.sh --fresh-preprocess` is NOT needed — this is a
-  training-only change, so `./run_pipeline.sh` suffices.
-- After run 6: if log-loss beats the prior baseline, tune further; if it
-  matches, the context features have no signal and the product should
-  lean on calibrated probabilities + the site rather than more tuning.
+  val_loss at 20, no overfitting). Rescored against the prior
+  *distribution*: **log-loss 1.1864 vs 1.3221 (+0.136), top-3 +5.5** —
+  the context features carry real signal. The flat top-1 was a bug:
+  `ALPHA_POWER=0.5` stacked a 17:1 class-weight ratio on focal gamma=2
+  and wrecked the majority class (FF recall 30% at precision 64%).
+- **Run 6 is queued**: `ALPHA_POWER` set to 0.0 (uniform). Training-only
+  change — `./run_pipeline.sh` suffices, no preprocessing rebuild.
+  Expect the hidden signal to surface as top-1 lift.
+- After run 6: if top-1 lift is now several points with log-loss holding
+  or improving, lock the model and build the Flask site. The product is
+  the calibrated distribution (top-3 already 91%), not the argmax.
 
 ## Conventions
 

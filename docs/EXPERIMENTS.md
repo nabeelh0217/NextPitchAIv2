@@ -45,7 +45,7 @@ at 4) inside the focal loss; evaluation adds top-3 and a
 
 | Run | Change vs. previous | Top-1 | Top-3 | Baseline | Lift | Verdict |
 |---|---|---|---|---|---|---|
-| 5 | v6 first real run (MacBook Air, Python 3.13) | **44.0%** | **91.3%** | 42.8% | **+1.2%** | 28 epochs, best val_loss 0.2278 at epoch 20. **No early overfitting** — val loss plateaus instead of rising, so the class-weighted loss did fix v5 run 4's memorization. But the lift is nearly nil, and the per-class pattern shows why: `ALPHA_POWER=0.5` produced a **17:1** weight ratio (FF 0.233, KN 4.0) *on top of* focal gamma=2. FF recall 30.2% at precision 0.637 (knows fastballs, penalized for calling them); KC recall 85.0% at precision 0.270, KN recall 98.1% at precision 0.336 (rare types fire constantly). Imbalance corrected twice — the same error v5 made with oversampling, in a different form. |
+| 5 | v6 first real run (MacBook Air, Python 3.13) | **44.0%** | **91.3%** | 42.8% | **+1.2%** | 28 epochs, best val_loss 0.2278 at epoch 20. **No early overfitting** — val loss plateaus instead of rising, so the class-weighted loss did fix v5 run 4's memorization. Argmax lift is nearly nil, but rescoring with the prior-*distribution* baseline showed the features carry real signal: **log-loss 1.1864 vs prior 1.3221 (+0.136 nats), top-3 91.3% vs 85.9% (+5.5%)**. The top-1 was suppressed by the weighting: `ALPHA_POWER=0.5` produced a **17:1** weight ratio (FF 0.233, KN 4.0) *on top of* focal gamma=2. FF recall 30.2% at precision 0.637 (knows fastballs, penalized for calling them); KC recall 85.0% at precision 0.270, KN recall 98.1% at precision 0.336. Imbalance corrected twice — v5's error in a different form. |
 | 6 | `ALPHA_POWER` 0.5 → 0.0 (uniform alpha; focal gamma alone handles imbalance). Evaluation now compares against the pitcher-prior **distribution** on top-1/top-3/log-loss. | _pending_ | | | | |
 
 ## Do not retry
@@ -66,9 +66,14 @@ The honest baseline is **the pitcher's own pitch mix, with no game
 context** — `evaluate_model.py` scores it as a full probability
 distribution (top-1, top-3, log-loss), not just its argmax. Any claim
 that sequence/count/matchup features matter has to show up as a log-loss
-improvement over that. Run 5's argmax lift was +1.2%; the log-loss
-comparison was added in run 6 to settle whether there is real signal
-underneath.
+improvement over that.
+
+**Settled by rescoring run 5: the features have real signal.** Model
+log-loss 1.1864 vs prior 1.3221 (+0.136 nats ≈ 14% higher likelihood on
+the true pitch), top-3 +5.5 points over the prior. Run 5's flat top-1
+was the class-weighting bug, not an information ceiling. Reference
+numbers for the prior baseline on this split: top-1 42.8%, top-3 85.9%,
+log-loss 1.3221.
 
 ## Pipeline bug fixes worth remembering (so they aren't regressed)
 
