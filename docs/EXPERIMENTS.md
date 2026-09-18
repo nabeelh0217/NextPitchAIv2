@@ -45,7 +45,8 @@ at 4) inside the focal loss; evaluation adds top-3 and a
 
 | Run | Change vs. previous | Top-1 | Top-3 | Baseline | Lift | Verdict |
 |---|---|---|---|---|---|---|
-| 5 | v6 first real run (MacBook Air, Python 3.13) | _pending_ | | | | Curves: 28 epochs, best val_loss ≈ epoch 18–19, val acc ≈ 43–44%, **no early overfitting** (val loss plateaus instead of rising — v5 run 4's problem is gone). Report text lost to a closed terminal; regenerate with `evaluate_model.py` and fill this row. |
+| 5 | v6 first real run (MacBook Air, Python 3.13) | **44.0%** | **91.3%** | 42.8% | **+1.2%** | 28 epochs, best val_loss 0.2278 at epoch 20. **No early overfitting** — val loss plateaus instead of rising, so the class-weighted loss did fix v5 run 4's memorization. But the lift is nearly nil, and the per-class pattern shows why: `ALPHA_POWER=0.5` produced a **17:1** weight ratio (FF 0.233, KN 4.0) *on top of* focal gamma=2. FF recall 30.2% at precision 0.637 (knows fastballs, penalized for calling them); KC recall 85.0% at precision 0.270, KN recall 98.1% at precision 0.336 (rare types fire constantly). Imbalance corrected twice — the same error v5 made with oversampling, in a different form. |
+| 6 | `ALPHA_POWER` 0.5 → 0.0 (uniform alpha; focal gamma alone handles imbalance). Evaluation now compares against the pitcher-prior **distribution** on top-1/top-3/log-loss. | _pending_ | | | | |
 
 ## Do not retry
 
@@ -54,6 +55,20 @@ at 4) inside the focal loss; evaluation adds top-3 and a
   zero-sum. (Both constants no longer exist in v6.)
 - **Game-level sequence lookback** — the v4 bug; per-pitcher is correct.
 - **Oversampling before the split** — the v4 66% was fake.
+- **Stacking two imbalance corrections.** Oversampling + focal loss (v5)
+  and alpha weighting + focal loss (run 5) both wrecked the majority
+  class. Focal gamma=2 is the correction; add class alpha only with
+  evidence that a class is genuinely ignored, and keep the ratio small.
+
+## The bar to beat
+
+The honest baseline is **the pitcher's own pitch mix, with no game
+context** — `evaluate_model.py` scores it as a full probability
+distribution (top-1, top-3, log-loss), not just its argmax. Any claim
+that sequence/count/matchup features matter has to show up as a log-loss
+improvement over that. Run 5's argmax lift was +1.2%; the log-loss
+comparison was added in run 6 to settle whether there is real signal
+underneath.
 
 ## Pipeline bug fixes worth remembering (so they aren't regressed)
 

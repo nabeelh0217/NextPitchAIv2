@@ -74,20 +74,28 @@ Savant directly — it cannot run from sandboxed/proxied environments.
 
 ## Evaluation vocabulary
 
-`03_train.py` prints top-1, top-3, a per-type classification report and
-confusion matrix, and a **baseline** ("always predict this pitcher's most
-common pitch type", from training rows). Judge the model by its *lift
-over that baseline*, and by top-3 (what the website will show). 10-class
-top-1 will read lower than the old 4-bucket numbers — that is expected.
+`03_train.py` and `evaluate_model.py` print the model against the
+**pitcher-prior baseline** — that pitcher's training pitch mix used as a
+full probability distribution — on top-1, top-3 and log-loss. The
+baseline is what you can predict knowing only who is on the mound, so
+**log-loss improvement over it is the test of whether the game-context
+features do anything at all**. 10-class top-1 reads lower than the old
+4-bucket numbers; that is expected and not a regression.
 
 ## Current status (2026-09-18)
 
-- v6 has had its **first real training run** on the MacBook Air (Python
-  3.13.15). Curves: 28 epochs, val loss plateaus ~epoch 18 with no early
-  overfitting — the class-weighted loss fixed v5's memorization problem.
-  The evaluation text was lost with a closed terminal; regenerate with
-  `.venv/bin/python evaluate_model.py` and log it in `docs/EXPERIMENTS.md`.
-- Then: decide tuning vs. lock the model and build the Flask site.
+- **Run 5 (first real v6 training): top-1 44.0%, top-3 91.3%, baseline
+  42.8%, lift +1.2%.** Training dynamics were healthy (28 epochs, best
+  val_loss at 20, no overfitting), but `ALPHA_POWER=0.5` stacked a 17:1
+  class-weight ratio on top of focal gamma=2 and wrecked the majority
+  class (FF recall 30% at precision 64%). See `docs/EXPERIMENTS.md`.
+- **Run 6 is queued**: `ALPHA_POWER` set to 0.0 (uniform), plus the
+  log-loss baseline comparison. Retrain with
+  `./run_pipeline.sh --fresh-preprocess` is NOT needed — this is a
+  training-only change, so `./run_pipeline.sh` suffices.
+- After run 6: if log-loss beats the prior baseline, tune further; if it
+  matches, the context features have no signal and the product should
+  lean on calibrated probabilities + the site rather than more tuning.
 
 ## Conventions
 

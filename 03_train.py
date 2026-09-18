@@ -78,7 +78,18 @@ DROPOUT_RATE = 0.3
 
 # Focal loss
 FOCAL_GAMMA = 2.0
-ALPHA_CAP = 4.0  # max per-class weight (protects vs ultra-rare classes)
+# Per-class alpha = (N / (K * count)) ** ALPHA_POWER, mean-normalized and
+# capped. ALPHA_POWER = 0 means uniform weights.
+#
+# Run 5 used 0.5, which produced a 17:1 weight ratio (FF 0.233, KN 4.0)
+# ON TOP OF focal gamma=2, which already upweights rare/hard examples.
+# The result was a model that under-called four-seamers (recall 30% at
+# precision 64%) and over-called every rare type (KC recall 85% at
+# precision 27%) — imbalance corrected twice, the same error v5 made with
+# oversampling. Gamma alone is the imbalance correction; raise this only
+# with evidence that a class is genuinely being ignored.
+ALPHA_POWER = 0.0
+ALPHA_CAP = 2.0
 
 # =========================
 # 0) Load metadata + arrays
@@ -141,15 +152,15 @@ y_val = y_labels[idx_val]
 # =========================
 # 2) Class-weighted focal loss
 # =========================
-# Per-class alpha from natural training frequencies: inverse-sqrt
-# frequency, normalized to mean 1, capped. Gradient-level rebalancing
-# with zero duplicated rows to memorize (run 4's curves showed physical
-# oversampling drove val loss up from ~epoch 5).
+# Focal loss with gamma=2 already concentrates gradient on hard/rare
+# examples. ALPHA_POWER adds optional extra per-class weighting on top;
+# it defaults to 0 (uniform) because run 5 showed the two corrections
+# compound badly. See the constant's comment above.
 counts = np.maximum(np.bincount(y_tr, minlength=n_pitch), 1)
-raw_alpha = (len(y_tr) / (n_pitch * counts)) ** 0.5
+raw_alpha = (len(y_tr) / (n_pitch * counts)) ** ALPHA_POWER
 class_alpha = np.minimum(raw_alpha / raw_alpha.mean(), ALPHA_CAP).astype(np.float32)
 
-print("\nClass weights (focal alpha):")
+print(f"\nClass weights (focal alpha, ALPHA_POWER={ALPHA_POWER}):")
 for i, cls in enumerate(pitch_classes):
     print(f"  {cls}: n={counts[i]:,}  alpha={class_alpha[i]:.3f}")
 

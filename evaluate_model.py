@@ -32,11 +32,38 @@ SPLIT_TEST_SIZE = 0.2
 SPLIT_SEED = 42
 
 
+def _topk_acc(probs, y, k):
+    """Fraction of rows whose true class is in the top-k of probs."""
+    topk = np.argsort(probs, axis=1)[:, -k:]
+    return float(np.any(y[:, None] == topk, axis=1).mean())
+
+
+def _log_loss(probs, y):
+    """Mean negative log-likelihood of the true class."""
+    p = np.clip(probs[np.arange(len(y)), y], 1e-12, 1.0)
+    return float(-np.log(p).mean())
+
+
+def _pitcher_prior_table(pid_tr, y_tr, n_classes, n_pitchers):
+    """
+    Each pitcher's pitch-type distribution over TRAINING rows, as a
+    probability table. Pitchers unseen in training fall back to the
+    league distribution. This is the honest bar for the model: what you
+    can predict knowing only who is pitching, with no game context.
+    """
+    counts = np.zeros((n_pitchers, n_classes), dtype=np.float64)
+    np.add.at(counts, (pid_tr, y_tr), 1.0)
+    league = np.bincount(y_tr, minlength=n_classes).astype(np.float64)
+    league /= league.sum()
+    totals = counts.sum(axis=1, keepdims=True)
+    return np.where(totals > 0, counts / np.maximum(totals, 1.0), league)
+
+
 def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
                  history=None) -> str:
     """
-    The evaluation block, as one string: top-1/top-3, the "pitcher's most
-    common pitch" baseline and lift, a per-type classification report,
+    The evaluation block, as one string: the model vs the pitcher-prior
+    baseline on top-1/top-3/log-loss, a per-type classification report,
     confusion matrix, per-class accuracy, and (if given) a training
     summary from the Keras history dict.
     """
@@ -44,17 +71,19 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
     out = lines.append
 
     y_pred = np.argmax(y_pred_probs, axis=1)
-    top1 = (y_pred == y_val).mean()
-    order = np.argsort(y_pred_probs, axis=1)
-    top3 = float(np.any(y_val[:, None] == order[:, -3:], axis=1).mean())
+    n_classes = y_pred_probs.shape[1]
 
-    # Baseline: always predict this pitcher's most common pitch type
-    # (from TRAINING rows only; UNK pitchers -> global mode).
-    tr_df = pd.DataFrame({"pid": pid_tr, "y": y_tr})
-    mode_by_pid = tr_df.groupby("pid")["y"].agg(lambda s: s.value_counts().idxmax())
-    global_mode = int(tr_df["y"].value_counts().idxmax())
-    baseline_pred = np.array([mode_by_pid.get(p, global_mode) for p in pid_val])
-    baseline_acc = (baseline_pred == y_val).mean()
+    # Baseline: the pitcher's own training distribution, used as a full
+    # probabilistic predictor rather than just its argmax. Comparing
+    # log-loss against it answers the question that matters — does game
+    # context add anything beyond knowing who is on the mound?
+    n_pitchers = int(max(pid_tr.max(), pid_val.max())) + 1
+    prior_table = _pitcher_prior_table(pid_tr, y_tr, n_classes, n_pitchers)
+    prior_probs = prior_table[pid_val]
+
+    m_top1, m_top3 = _topk_acc(y_pred_probs, y_val, 1), _topk_acc(y_pred_probs, y_val, 3)
+    b_top1, b_top3 = _topk_acc(prior_probs, y_val, 1), _topk_acc(prior_probs, y_val, 3)
+    m_ll, b_ll = _log_loss(y_pred_probs, y_val), _log_loss(prior_probs, y_val)
 
     out("=" * 50)
     out("EVALUATION (natural distribution)")
@@ -65,10 +94,14 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
         out(f"\nTraining: {n_epochs} epochs run, best val_loss "
             f"{history['val_loss'][best]:.4f} at epoch {best + 1}, "
             f"val_acc there {history['val_accuracy'][best]:.1%}")
-    out(f"\nTop-1 accuracy: {top1:.1%}")
-    out(f"Top-3 accuracy: {top3:.1%}")
-    out(f"Baseline (pitcher's most common pitch): {baseline_acc:.1%}")
-    out(f"Lift over baseline: {top1 - baseline_acc:+.1%}")
+
+    out("\nModel vs pitcher-prior baseline")
+    out("(baseline = this pitcher's training pitch mix, no game context)")
+    out(f"{'':<12}{'model':>10}{'baseline':>12}{'lift':>10}")
+    out(f"{'top-1':<12}{m_top1:>9.1%}{b_top1:>12.1%}{m_top1 - b_top1:>+10.1%}")
+    out(f"{'top-3':<12}{m_top3:>9.1%}{b_top3:>12.1%}{m_top3 - b_top3:>+10.1%}")
+    out(f"{'log-loss':<12}{m_ll:>10.4f}{b_ll:>12.4f}{b_ll - m_ll:>+10.4f}"
+        "   (positive = model better)")
 
     present = sorted(set(y_val.tolist()) | set(y_pred.tolist()))
     present_names = [pitch_classes[i] for i in present]
