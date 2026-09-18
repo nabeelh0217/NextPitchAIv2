@@ -174,7 +174,9 @@ echo "[3/3] Training model — grab a coffee ..."
 
 banner "DONE"
 echo " Model:            data_v5/best_model_v5.keras"
+echo " Eval report:      data_v5/eval_report_v5.txt   (safe to close the terminal)"
 echo " Training curves:  data_v5/training_curves_v5.png"
-echo " Copy the evaluation report printed above back into"
-echo " Claude Code / Cursor, and log the run in docs/EXPERIMENTS.md."
+echo " Paste the report back into Claude Code / Cursor and log the run"
+echo " in docs/EXPERIMENTS.md. Regenerate it any time with:"
+echo "     .venv/bin/python evaluate_model.py"
 echo

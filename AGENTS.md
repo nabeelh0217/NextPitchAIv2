@@ -19,7 +19,8 @@ website (`site/`, not yet built) will serve these predictions.
 |---|---|
 | `01_scrape_statcast.py` | Pulls 2022–2024 Statcast pitches via pybaseball → `statcast_raw_v5.parquet` (atomic write) |
 | `02_preprocess.py` | Leakage-free feature engineering → `data_v5/` arrays, scalers, ID maps, website artifacts |
-| `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` |
+| `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` + `eval_report_v5.txt` |
+| `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining). `03_train.py` imports its `build_report` so the two can't drift |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |
 | `.cursor/rules/` | Cursor-scoped rules (point back here) |
@@ -79,14 +80,13 @@ common pitch type", from training rows). Judge the model by its *lift
 over that baseline*, and by top-3 (what the website will show). 10-class
 top-1 will read lower than the old 4-bucket numbers — that is expected.
 
-## Current status (2026-09-17)
+## Current status (2026-09-18)
 
-- v6 code is complete, smoke-tested end to end on synthetic data, and
-  pushed. **It has never been trained on real data** — the Windows
-  machine with the scraped parquet is gone.
-- Next: run `./run_pipeline.sh` on the MacBook Air (full re-scrape +
-  preprocess + train, ~1.5–3 h), paste the evaluation report and
-  `data_v5/training_curves_v5.png` back to the agent, log the run.
+- v6 has had its **first real training run** on the MacBook Air (Python
+  3.13.15). Curves: 28 epochs, val loss plateaus ~epoch 18 with no early
+  overfitting — the class-weighted loss fixed v5's memorization problem.
+  The evaluation text was lost with a closed terminal; regenerate with
+  `.venv/bin/python evaluate_model.py` and log it in `docs/EXPERIMENTS.md`.
 - Then: decide tuning vs. lock the model and build the Flask site.
 
 ## Conventions

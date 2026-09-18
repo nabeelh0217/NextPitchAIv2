@@ -45,7 +45,7 @@ at 4) inside the focal loss; evaluation adds top-3 and a
 
 | Run | Change vs. previous | Top-1 | Top-3 | Baseline | Lift | Verdict |
 |---|---|---|---|---|---|---|
-| 5 | v6 first real run | _pending_ | | | | Run on the MacBook Air after the re-scrape. |
+| 5 | v6 first real run (MacBook Air, Python 3.13) | _pending_ | | | | Curves: 28 epochs, best val_loss ≈ epoch 18–19, val acc ≈ 43–44%, **no early overfitting** (val loss plateaus instead of rising — v5 run 4's problem is gone). Report text lost to a closed terminal; regenerate with `evaluate_model.py` and fill this row. |
 
 ## Do not retry
 

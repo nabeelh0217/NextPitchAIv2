@@ -34,6 +34,14 @@
       "problemMatcher": []
     },
     {
+      "label": "NextPitchAI: Evaluate saved model",
+      "detail": "Regenerates data_v5/eval_report_v5.txt from best_model_v5.keras without retraining (~minutes)",
+      "type": "shell",
+      "command": ".venv/bin/python evaluate_model.py",
+      "windows": { "command": ".venv\\Scripts\\python.exe evaluate_model.py" },
+      "problemMatcher": []
+    },
+    {
       "label": "NextPitchAI: Full pipeline",
       "detail": "Scrape -> preprocess -> train, skipping steps already done",
       "type": "shell",

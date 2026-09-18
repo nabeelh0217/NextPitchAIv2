@@ -95,7 +95,13 @@ within the real repertoire. Class imbalance is handled by
 frequency; no row duplication). Evaluation reports top-1/top-3 accuracy,
 a per-type classification report and confusion matrix, and a
 "pitcher's most common pitch" baseline for honest lift measurement —
-all on the natural class distribution.
+all on the natural class distribution — and writes it to
+`data_v5/eval_report_v5.txt`.
+
+### `evaluate_model.py`
+Regenerates that report from `data_v5/best_model_v5.keras` without
+retraining (same split, same numbers). Run it if the terminal output is
+gone: `.venv/bin/python evaluate_model.py`.
 
 ## Notes
 

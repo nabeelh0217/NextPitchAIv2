@@ -38,7 +38,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
@@ -49,6 +48,8 @@ from tensorflow.keras.callbacks import (
     EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 )
 from tensorflow.keras import backend as K
+
+from evaluate_model import build_report, write_report
 
 # =========================
 # Config
@@ -292,54 +293,19 @@ history = model.fit(
 # =========================
 # 6) Evaluate — natural distribution
 # =========================
-print("\n" + "=" * 50)
-print("EVALUATION (natural distribution)")
-print("=" * 50)
+# The report is also written to data_v5/eval_report_v5.txt so a closed
+# terminal doesn't lose it. `python evaluate_model.py` regenerates it from
+# the saved model at any time.
+hist_dict = {k: [float(v) for v in vals] for k, vals in history.history.items()}
 
-y_pred_probs = model.predict(val_inputs, verbose=0)
-y_pred = np.argmax(y_pred_probs, axis=1)
-
-top1 = (y_pred == y_val).mean()
-order = np.argsort(y_pred_probs, axis=1)
-top3 = np.mean([(y_val[i] in order[i, -3:]) for i in range(len(y_val))])
-
-# Baseline: always predict this pitcher's most common pitch type
-# (computed from TRAINING rows only; UNK pitchers -> global mode).
-tr_df = pd.DataFrame({"pid": X_pitcher_id[idx_tr], "y": y_tr})
-mode_by_pid = tr_df.groupby("pid")["y"].agg(lambda s: s.value_counts().idxmax())
-global_mode = int(tr_df["y"].value_counts().idxmax())
-baseline_pred = np.array([
-    mode_by_pid.get(pid, global_mode) for pid in X_pitcher_id[idx_val]
-])
-baseline_acc = (baseline_pred == y_val).mean()
-
-print(f"\nTop-1 accuracy: {top1:.1%}")
-print(f"Top-3 accuracy: {top3:.1%}")
-print(f"Baseline (pitcher's most common pitch): {baseline_acc:.1%}")
-print(f"Lift over baseline: {top1 - baseline_acc:+.1%}")
-
-present = sorted(set(y_val.tolist()) | set(y_pred.tolist()))
-present_names = [pitch_classes[i] for i in present]
-
-print("\nClassification Report:")
-print(classification_report(
-    y_val, y_pred,
-    labels=present,
-    target_names=present_names,
-    digits=3,
-    zero_division=0,
-))
-
-print("\nConfusion Matrix:")
-cm = confusion_matrix(y_val, y_pred, labels=present)
-print(pd.DataFrame(cm, index=present_names, columns=present_names))
-
-print("\nPer-class accuracy:")
-for i in present:
-    mask = y_val == i
-    if mask.sum() > 0:
-        acc = (y_pred[mask] == i).mean()
-        print(f"  {pitch_classes[i]}: {acc:.1%} ({mask.sum():,} samples)")
+y_pred_probs = model.predict(val_inputs, batch_size=2048, verbose=0)
+report = build_report(
+    y_val, y_pred_probs,
+    X_pitcher_id[idx_tr], y_tr,
+    X_pitcher_id[idx_val], pitch_classes, hist_dict,
+)
+print("\n" + report)
+write_report(report)
 
 
 # =========================
@@ -370,5 +336,6 @@ with open(DATA_DIR / "training_history_v5.json", "w") as f:
     json.dump(hist_dict, f, indent=2)
 
 print("\nDone!")
-print(f"Best model: {DATA_DIR / 'best_model_v5.keras'}")
-print(f"Final model: {DATA_DIR / 'final_model_v5.keras'}")
+print(f"Best model:   {DATA_DIR / 'best_model_v5.keras'}")
+print(f"Final model:  {DATA_DIR / 'final_model_v5.keras'}")
+print(f"Eval report:  {DATA_DIR / 'eval_report_v5.txt'}")

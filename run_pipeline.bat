@@ -184,9 +184,11 @@ echo.
 echo ============================================
 echo  DONE!
 echo  Model:            data_v5\best_model_v5.keras
+echo  Eval report:      data_v5\eval_report_v5.txt   ^(safe to close this window^)
 echo  Training curves:  data_v5\training_curves_v5.png
-echo  Copy the classification report printed above
-echo  back into Claude Code to tune hyperparameters.
+echo  Paste the report back into Claude Code and log the run in
+echo  docs\EXPERIMENTS.md. Regenerate it any time with:
+echo      .venv\Scripts\python.exe evaluate_model.py
 echo ============================================
 pause
 exit /b 0
