@@ -84,19 +84,18 @@ features do anything at all**. 10-class top-1 reads lower than the old
 
 ## Current status (2026-09-18)
 
-- **Run 5 (first real v6 training): top-1 44.0%, top-3 91.3%, baseline
-  42.8%, lift +1.2%.** Training dynamics were healthy (28 epochs, best
-  val_loss at 20, no overfitting). Rescored against the prior
-  *distribution*: **log-loss 1.1864 vs 1.3221 (+0.136), top-3 +5.5** —
-  the context features carry real signal. The flat top-1 was a bug:
-  `ALPHA_POWER=0.5` stacked a 17:1 class-weight ratio on focal gamma=2
-  and wrecked the majority class (FF recall 30% at precision 64%).
-- **Run 6 is queued**: `ALPHA_POWER` set to 0.0 (uniform). Training-only
-  change — `./run_pipeline.sh` suffices, no preprocessing rebuild.
-  Expect the hidden signal to surface as top-1 lift.
-- After run 6: if top-1 lift is now several points with log-loss holding
-  or improving, lock the model and build the Flask site. The product is
-  the calibrated distribution (top-3 already 91%), not the argmax.
+- **Run 6 (uniform alpha) is the best model so far: top-1 48.9%, top-3
+  92.1%, log-loss 1.1531 vs prior 1.3221 — lift +6.1 / +6.2 / +0.169.**
+  The context features demonstrably carry signal. Trade-off: minority
+  recall dropped (CU 13.5%, KC 21.0%) as the model leans on FF/SI when
+  uncertain; macro-F1 0.422 vs run 5's 0.449.
+- **Run 7 is queued**: `ALPHA_POWER` 0.0 → 0.25, a midpoint probe
+  (3.6:1 weight ratio). Training-only — `./run_pipeline.sh` suffices.
+  **This is the last alpha round**; `docs/EXPERIMENTS.md` carries the
+  decision rule for keeping 0.25 vs reverting to run 6's 0.0.
+- After run 7: lock the model and build the Flask site. The product is
+  the arsenal-masked calibrated distribution (top-3 ≈92%), not the
+  argmax. Do not reopen the alpha search.
 
 ## Conventions
 

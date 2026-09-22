@@ -81,14 +81,23 @@ FOCAL_GAMMA = 2.0
 # Per-class alpha = (N / (K * count)) ** ALPHA_POWER, mean-normalized and
 # capped. ALPHA_POWER = 0 means uniform weights.
 #
-# Run 5 used 0.5, which produced a 17:1 weight ratio (FF 0.233, KN 4.0)
-# ON TOP OF focal gamma=2, which already upweights rare/hard examples.
-# The result was a model that under-called four-seamers (recall 30% at
-# precision 64%) and over-called every rare type (KC recall 85% at
-# precision 27%) — imbalance corrected twice, the same error v5 made with
-# oversampling. Gamma alone is the imbalance correction; raise this only
-# with evidence that a class is genuinely being ignored.
-ALPHA_POWER = 0.0
+# Both endpoints have been measured; this is a precision/recall frontier,
+# not a bug to fix:
+#   0.5 (run 5): 17:1 weight ratio (FF 0.233, KN 4.0) stacked on focal
+#       gamma=2. Wrecked the majority class — FF recall 30.2% at
+#       precision 0.637 — for minority recall (KC 85.0%, FS 84.2%).
+#       top-1 lift +1.2%, log-loss 1.1864, macro-F1 0.449.
+#   0.0 (run 6): uniform. Every headline metric best-so-far — top-1 lift
+#       +6.1%, top-3 +6.2%, log-loss 1.1531 — but the model leans on
+#       FF/SI when uncertain, so minority recall collapsed (CU 51.4% ->
+#       13.5%, KC 85.0% -> 21.0%). macro-F1 fell to 0.422.
+#
+# 0.25 is the midpoint probe. DECISION RULE, fixed in advance so this
+# does not become an open-ended sweep: keep 0.25 only if it recovers
+# minority recall (CU/KC above ~35-40%) AND holds top-1 lift above +1.2%
+# with log-loss at or below 1.1864. Otherwise revert to 0.0 and accept
+# run 6. Either way this is the last alpha round — see docs/EXPERIMENTS.md.
+ALPHA_POWER = 0.25
 ALPHA_CAP = 2.0
 
 # =========================
