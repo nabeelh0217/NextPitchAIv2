@@ -22,8 +22,8 @@ Features:
   - Times through the order, in-game pitch count, pitcher rest days
   - RISP flag, pitch number within at-bat
   - Ballpark ID (home team) + catcher ID for embeddings
-  - Sequences: this pitcher's previous 8 pitches (type one-hot, physics,
-    same-at-bat flag)
+  - Sequences: this pitcher's previous 8 pitches (type one-hot, OUTCOME
+    one-hot, physics, same-at-bat flag)
   - Arsenal mask: (N, 10) binary — which pitch types this pitcher throws
 
 Requirements:
@@ -109,6 +109,26 @@ SWING_DESCRIPTIONS = {
 WHIFF_DESCRIPTIONS = {
     "swinging_strike", "swinging_strike_blocked", "missed_bunt",
 }
+
+# What HAPPENED to each previous pitch. A catcher calls the next pitch
+# very differently after a swinging strike than after a foul, and the
+# count alone cannot express that: 1-1 reached via two fouls is a
+# different at-bat from 1-1 reached via ball-then-called-strike.
+# Used ONLY in the lookback window (see build_sequences), never for the
+# pitch being predicted — the outcome of the current pitch would leak
+# its type directly.
+OUTCOME_CLASSES = ["ball", "called_strike", "whiff", "foul", "in_play"]
+N_OUTCOME = len(OUTCOME_CLASSES)
+OUTCOME_OF = {}
+for _d in ("ball", "blocked_ball", "pitchout", "hit_by_pitch"):
+    OUTCOME_OF[_d] = 0
+OUTCOME_OF["called_strike"] = 1
+for _d in WHIFF_DESCRIPTIONS:
+    OUTCOME_OF[_d] = 2
+for _d in ("foul", "foul_tip", "foul_bunt", "bunt_foul_tip", "foul_pitchout"):
+    OUTCOME_OF[_d] = 3
+for _d in ("hit_into_play", "hit_into_play_score", "hit_into_play_no_out"):
+    OUTCOME_OF[_d] = 4
 
 
 def build_id_mapping(series: pd.Series, min_count: int) -> dict:
@@ -236,24 +256,36 @@ def build_context_features(df: pd.DataFrame) -> tuple:
 def build_pitch_features(df: pd.DataFrame, pitch_idx: np.ndarray) -> np.ndarray:
     """
     Per-pitch feature vector used as sequence timesteps:
-      0..K-1 : one-hot pitch type
-      K      : release_speed
-      K+1    : plate_x
-      K+2    : plate_z
-      K+3    : release_spin_rate
-      K+4    : pfx_x (horizontal movement)
-      K+5    : pfx_z (vertical movement)
+      0..K-1       : one-hot pitch type
+      K..K+O-1     : one-hot outcome (ball/called/whiff/foul/in-play)
+      K+O          : release_speed
+      K+O+1        : plate_x
+      K+O+2        : plate_z
+      K+O+3        : release_spin_rate
+      K+O+4        : pfx_x (horizontal movement)
+      K+O+5        : pfx_z (vertical movement)
+
+    Both one-hots come FIRST so the scaler can be applied to the
+    continuous tail only. An unrecognised description leaves the outcome
+    block all-zero, which is a valid "unknown" state.
     """
     n_cont = 6
-    feats = np.zeros((len(df), N_PITCH + n_cont), dtype=np.float32)
+    base = N_PITCH + N_OUTCOME
+    feats = np.zeros((len(df), base + n_cont), dtype=np.float32)
     for i in range(N_PITCH):
         feats[pitch_idx == i, i] = 1.0
-    feats[:, N_PITCH + 0] = df["release_speed"].fillna(0).values
-    feats[:, N_PITCH + 1] = df["plate_x"].fillna(0).values
-    feats[:, N_PITCH + 2] = df["plate_z"].fillna(0).values
-    feats[:, N_PITCH + 3] = df["release_spin_rate"].fillna(0).values
-    feats[:, N_PITCH + 4] = df["pfx_x"].fillna(0).values
-    feats[:, N_PITCH + 5] = df["pfx_z"].fillna(0).values
+
+    out_idx = df["description"].map(OUTCOME_OF).values
+    known = ~pd.isna(out_idx)
+    rows = np.flatnonzero(known)
+    feats[rows, N_PITCH + out_idx[known].astype(int)] = 1.0
+
+    feats[:, base + 0] = df["release_speed"].fillna(0).values
+    feats[:, base + 1] = df["plate_x"].fillna(0).values
+    feats[:, base + 2] = df["plate_z"].fillna(0).values
+    feats[:, base + 3] = df["release_spin_rate"].fillna(0).values
+    feats[:, base + 4] = df["pfx_x"].fillna(0).values
+    feats[:, base + 5] = df["pfx_z"].fillna(0).values
     return feats
 
 
@@ -436,8 +468,9 @@ def main():
     pitch_feats = build_pitch_features(df, y_labels.astype(np.int32))
 
     seq_scaler = StandardScaler()
-    continuous = pitch_feats[:, N_PITCH:]
-    pitch_feats[:, N_PITCH:] = seq_scaler.fit_transform(continuous).astype(np.float32)
+    cont_start = N_PITCH + N_OUTCOME
+    continuous = pitch_feats[:, cont_start:]
+    pitch_feats[:, cont_start:] = seq_scaler.fit_transform(continuous).astype(np.float32)
 
     print(f"Building per-pitcher sequences of length {SEQ_LEN} "
           "(this may take a few minutes)...")
@@ -516,6 +549,7 @@ def main():
         "ctx_feature_names": ctx_feature_names,
         "n_pitch_types": N_PITCH,
         "pitch_classes": PITCH_CLASSES,
+        "outcome_classes": OUTCOME_CLASSES,
         "n_pitcher_ids": len(pitcher_map) + 1,
         "n_batter_ids": len(batter_map) + 1,
         "n_park_ids": len(park_map) + 1,

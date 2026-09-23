@@ -383,3 +383,34 @@ That is a falsifiable hypothesis: add the outcome one-hot per timestep,
 retrain, and re-run section 5. If within-cell lift and the cell win rate
 move, the model earns a live deployment. If they do not, ship the table
 and stop.
+
+## Run 8 (queued): previous-pitch outcomes in the sequence
+
+The falsifiable hypothesis from section 5. Within-cell lift of ~0 is what
+you would expect if the sequence branch carries nothing the count does not
+already encode — and until now it did not know what HAPPENED to any of the
+previous 8 pitches.
+
+`build_pitch_features` now emits a 5-way outcome one-hot per timestep
+(ball / called_strike / whiff / foul / in_play), placed between the pitch
+one-hot and the physics block so the scaler still touches only the
+continuous tail. Sequence width 17 -> 22.
+
+Why this should matter: 1-1 reached via two fouls is a different at-bat
+from 1-1 reached via ball-then-called-strike, and the count cannot say so.
+A catcher calls the next pitch very differently after a swinging strike.
+
+**Leakage:** the outcome of the CURRENT pitch would leak its type almost
+directly. It is safe only because `build_sequences` slices strictly before
+the current index. Verified on synthetic data: 400 sampled rows, every
+non-padded timestep matches a strictly earlier pitch, no row sees its own
+outcome, and every outcome block is exactly one-hot.
+
+**Success criterion, fixed in advance** — judge on section 5, not top-1:
+- cell win rate crosses **50%** (was 45%), AND
+- the oracle gap closes (was -0.1%), AND
+- lift over scout materially above +0.7%
+
+If those move, the model earns a live deployment. If they do not, the
+sequence branch has nothing to give: ship the pitcher x count table and
+stop modeling.

@@ -94,6 +94,11 @@ Savant directly — it cannot run from sandboxed/proxied environments.
 3. **Sequences are per (game_pk, pitcher).** The lookback window is the
    *same pitcher's* previous pitches. The v4 approach (previous N rows of
    the game) mostly captured the opposing pitcher — never regress to it.
+   Each timestep carries the pitch TYPE one-hot, the OUTCOME one-hot
+   (ball / called strike / whiff / foul / in-play), physics, and a
+   same-at-bat flag. The outcome is safe only because `build_sequences`
+   slices strictly before the current index — the outcome of the pitch
+   being predicted would leak its type directly. Never widen the slice.
 4. **Arsenal mask semantics.** `X_arsenal_mask` is 1 for every pitch type
    the pitcher threw ≥1 time in the full dataset. It is a model INPUT;
    `03_train.py` adds `(1 - mask) * -1e9` to the logits before softmax.
