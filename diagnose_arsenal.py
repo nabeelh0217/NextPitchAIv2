@@ -128,10 +128,25 @@ def main():
           f"{zeros:,} ({zeros / len(idx_val):.2%})")
     print("  Each costs the baseline -log(1e-12) = 27.6 nats after clipping.")
     if zeros:
-        infl = zeros / len(idx_val) * (27.6 - 2.0)
-        print(f"  Rough inflation of the baseline's log-loss: ~{infl:.3f} nats")
-        print(f"  Reported gap was 0.157-0.169 nats — so this alone could")
-        print(f"  account for {'MOST' if infl > 0.10 else 'part'} of the model's log-loss win.")
+        # The counterfactual is NOT zero loss — it is the loss the baseline
+        # would take under smoothing, which is a few nats, not ~2. Using the
+        # actual smoothed probability keeps this estimate honest instead of
+        # inflating the correction by ~30%.
+        league = np.bincount(y[idx_tr], minlength=K).astype(float)
+        league /= league.sum()
+        sm = 25.0
+        smoothed = (counts[pid[idx_val]] + sm * league) / (totals[pid[idx_val]] + sm)
+        hit_sm = smoothed[np.arange(len(idx_val)), y[idx_val]]
+        z = hit == 0
+        avoided = -np.log(np.clip(hit_sm[z], 1e-12, 1.0)).mean()
+        infl = zeros / len(idx_val) * (27.631 - avoided)
+        print(f"  Under smoothing those rows would cost {avoided:.1f} nats each,")
+        print(f"  not 27.6 — so the real inflation is ~{infl:.4f} nats.")
+        print(f"  Reported lift was 0.157-0.169 nats, so this accounts for")
+        print(f"  ~{infl / 0.157:.0%} of it.")
+        print(f"\n  Full smoothed-baseline log-loss: "
+              f"{-np.log(np.clip(hit_sm, 1e-12, 1.0)).mean():.4f}  "
+              f"(raw: {-np.log(np.clip(hit, 1e-12, 1.0)).mean():.4f})")
 
     # ---------------------------------------------------------------
     hdr("D. What is the ceiling?")

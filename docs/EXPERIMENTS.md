@@ -47,7 +47,56 @@ at 4) inside the focal loss; evaluation adds top-3 and a
 |---|---|---|---|---|---|---|
 | 5 | v6 first real run (MacBook Air, Python 3.13) | **44.0%** | **91.3%** | 42.8% | **+1.2%** | 28 epochs, best val_loss 0.2278 at epoch 20. **No early overfitting** — val loss plateaus instead of rising, so the class-weighted loss did fix v5 run 4's memorization. Argmax lift is nearly nil, but rescoring with the prior-*distribution* baseline showed the features carry real signal: **log-loss 1.1864 vs prior 1.3221 (+0.136 nats), top-3 91.3% vs 85.9% (+5.5%)**. The top-1 was suppressed by the weighting: `ALPHA_POWER=0.5` produced a **17:1** weight ratio (FF 0.233, KN 4.0) *on top of* focal gamma=2. FF recall 30.2% at precision 0.637 (knows fastballs, penalized for calling them); KC recall 85.0% at precision 0.270, KN recall 98.1% at precision 0.336. Imbalance corrected twice — v5's error in a different form. |
 | 6 | `ALPHA_POWER` 0.5 → 0.0 (uniform alpha; focal gamma alone handles imbalance). Evaluation now compares against the pitcher-prior **distribution** on top-1/top-3/log-loss. | **48.9%** | **92.1%** | 42.8% | **+6.1%** | 28 epochs, best val_loss 0.5984 at epoch 20. **Every headline metric best-so-far**: top-1 lift 5x better than run 5, top-3 +6.2 over prior, log-loss 1.1531 vs prior 1.3221 (+0.169). Confirms the run-5 diagnosis — the double imbalance correction was suppressing real signal. **But it is a frontier move, not a free win**: the model now leans on FF/SI when uncertain, so minority recall collapsed (CU 51.4%→13.5%, KC 85.0%→21.0%, FS 84.2%→48.8%, ST 67.5%→41.1%) while FF rose 30.2%→69.5% and SI 45.4%→62.7%. macro-F1 fell 0.449→0.422 even as weighted-F1 rose 0.438→0.468. A curveball is now the argmax only 13.5% of the times it is actually thrown. |
-| 7 | `ALPHA_POWER` 0.0 → 0.25 (midpoint probe; weight ratio 3.6:1 vs run 5's 17.2:1 and run 6's 1:1) | _pending_ | | | | **Last alpha round** — see the decision rule below. |
+| 7 | `ALPHA_POWER` 0.0 → 0.25 (midpoint probe; weight ratio 3.6:1 vs run 5's 17.2:1 and run 6's 1:1) | **47.4%** | **91.9%** | 42.8% | **+4.5%** | 27 epochs, best val_loss 0.4281 at epoch 19. log-loss 1.1650. **Best macro-F1 of any run (0.457** vs run 6's 0.422 and run 5's 0.449). Decision rule partially met: KC recovered 21.0%→53.5% and FS 48.8%→74.8%, but CU reached only 30.6% (rule wanted ~35-40%); top-1 lift +4.5% > +1.2% and log-loss 1.1650 < 1.1864, both pass. **Verdict: the alpha frontier is confirmed and closed.** Runs 5/6/7 moved log-loss only 0.033 nats while moving top-1 4.9 points — the information content is pinned; alpha only moves the decision threshold. Pick by product need: run 6 for best calibration/top-1, run 7 for balance across pitch types. |
+
+## Post-run-7 audit (5 parallel auditors + adversarial verification)
+
+Triggered by the question "is the evaluation flawed because the model is
+guessing from all pitch types rather than the pitcher's arsenal?"
+
+**That hypothesis is REFUTED**, unanimously and at high confidence, four ways:
+the mask op is baked into the saved graph (03_train.py:246) and reproduced by
+`load_model`; `evaluate_model.py` passes the mask as the 9th input (a missing
+mask would be a shape error, not a silent pass-through); Keras softmax makes a
+masked logit exactly 0.0; and the confusion matrix shows only 707/426,731
+knuckleball predictions. **Critically, the pitcher-prior baseline is ALSO
+arsenal-constrained** — a pitcher's own pitch mix assigns zero to types they
+never threw — so the reported lift was already a within-arsenal comparison.
+One auditor went further: the mask is structurally a *superset* of the
+baseline's support, so it contributes ~zero to the reported lift.
+
+**The one place the intuition lands:** at deployment, an unseen pitcher gets an
+all-ones mask, so the served model really does choose among all 10 types.
+Expect materially worse than 47.4% for debut/low-volume pitchers.
+
+### Real defects found, ranked by effect on the reported numbers
+
+| Severity | Defect | Effect |
+|---|---|---|
+| **CRITICAL** | Random per-pitch split puts same-at-bat and same-outing pitches in both train and val (`03_train.py` `train_test_split`). Validation rows are not independent of training rows. | Inflates top-1/top-3/log-loss AND the lift, since the baseline is split-invariant. Est. **1-4 points of top-1** — a large fraction of the +4.5/+6.1 lift. Magnitude unmeasured. |
+| **HIGH** | Arsenal mask is built over train+val (`02_preprocess.py:373`), so the true validation label can never be zeroed. | Contaminates log-loss specifically. Estimates ranged 5-18%, 20-70%, and 0.06-0.13 of the 0.157 lift — auditors disagreed; needs measurement. Barely touches top-1/top-3. |
+| **HIGH** | Baseline is unsmoothed, so it can assign exactly 0 and eat 27.6 nats after clipping; the masked softmax structurally never can. | Inflates the log-loss lift only. Est. +0.005 to +0.028 nats of the reported +0.157. **Fixed** — evaluator now reports a smoothed baseline alongside the raw one. |
+| **MEDIUM** | Mask threshold is a raw count (>=1 ever), not a usage share, so permissiveness scales with pitch volume — starters' masks approach all-ones. | 25,684 val rows (6.0%) are predictions a true-arsenal mask would forbid. Degrades the calibrated distribution, which is the product. |
+| **MEDIUM** | macro-F1 / per-class recall were used to steer three hour-long runs, but the product ships a probability distribution. Focal loss is not a proper scoring rule. | No effect on the numbers; it misdirected the tuning. On log-loss alone, run 6 wins outright and the alpha search should have ended there. |
+| LOW | Baseline keyed on UNK-collapsed pitcher id while the model's mask uses the raw id. | ~0.5% of rows, ~3-4% of the lift. |
+| LOW | No held-out test set — early stopping, checkpointing and the 3-run alpha search all scored on the same rows. | ~2% of the lift; does not change run ordering. |
+
+### The ceiling (the answer to "something isn't working")
+
+- Pitcher identity carries **78% of all extractable information**. The entire
+  game-context contribution is worth ~0.58 "effective pitch types".
+- **Realistic ceiling is 52-56% top-1.** At 47-49% the model has captured
+  roughly half the available headroom.
+- **Top-3 at 91.9-92.1% is within 2-3 points of any achievable ceiling** — and
+  top-3 is what the product ships. The 10-class top-1 is the wrong headline.
+- Published numbers that look better are **binary** (fastball vs rest) or use
+  the predicted pitch's own velocity/spin as a feature, i.e. leakage. Measured
+  as lift over its own honest baseline, this project is at or above the
+  non-leaky literature.
+- Collapsed to fastball-family vs rest, run 7 scores ~62% vs a ~56% baseline —
+  now reported automatically by `evaluate_model.py`.
+- Highest-leverage next move is **shipping with the right headline metric**.
+  More data ranks LAST and may be net negative.
 
 ### Run 7 decision rule (fixed in advance)
 

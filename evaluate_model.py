@@ -59,6 +59,30 @@ def _pitcher_prior_table(pid_tr, y_tr, n_classes, n_pitchers):
     return np.where(totals > 0, counts / np.maximum(totals, 1.0), league)
 
 
+# Fastball family, for the literature-comparable binary collapse. Most
+# published next-pitch numbers are fastball-vs-rest, NOT 10-class, so the
+# 10-class top-1 cannot be compared to them directly.
+FASTBALL_FAMILY = {"FF", "SI", "FC"}
+
+# Pseudo-counts for the smoothed baseline, matching ARSENAL_SMOOTHING in
+# 02_preprocess.py. The model's own arsenal_prior feature is smoothed this
+# way; scoring the baseline unsmoothed while the masked softmax can never
+# output a zero makes the log-loss comparison asymmetric in the model's
+# favour. Both are reported so runs 5-7 stay comparable.
+PRIOR_SMOOTHING = 25.0
+
+
+def _smoothed(counts, totals, league, sm=PRIOR_SMOOTHING):
+    return (counts + sm * league) / (totals + sm)
+
+
+def _binary_collapse(probs, y, classes):
+    """Fastball-family vs rest: sum probability within each group."""
+    fam = np.array([1 if c in FASTBALL_FAMILY else 0 for c in classes])
+    p_fb = probs[:, fam == 1].sum(axis=1)
+    return (p_fb >= 0.5).astype(int), fam[y]
+
+
 def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
                  history=None) -> str:
     """
@@ -78,12 +102,25 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
     # log-loss against it answers the question that matters — does game
     # context add anything beyond knowing who is on the mound?
     n_pitchers = int(max(pid_tr.max(), pid_val.max())) + 1
-    prior_table = _pitcher_prior_table(pid_tr, y_tr, n_classes, n_pitchers)
-    prior_probs = prior_table[pid_val]
+    counts = np.zeros((n_pitchers, n_classes), dtype=np.float64)
+    np.add.at(counts, (pid_tr, y_tr), 1.0)
+    league = np.bincount(y_tr, minlength=n_classes).astype(np.float64)
+    league /= league.sum()
+    totals = counts.sum(axis=1, keepdims=True)
+
+    prior_probs = np.where(totals > 0, counts / np.maximum(totals, 1.0), league)[pid_val]
+    smooth_probs = _smoothed(counts, totals, league)[pid_val]
 
     m_top1, m_top3 = _topk_acc(y_pred_probs, y_val, 1), _topk_acc(y_pred_probs, y_val, 3)
     b_top1, b_top3 = _topk_acc(prior_probs, y_val, 1), _topk_acc(prior_probs, y_val, 3)
-    m_ll, b_ll = _log_loss(y_pred_probs, y_val), _log_loss(prior_probs, y_val)
+    s_top1, s_top3 = _topk_acc(smooth_probs, y_val, 1), _topk_acc(smooth_probs, y_val, 3)
+    m_ll = _log_loss(y_pred_probs, y_val)
+    b_ll = _log_loss(prior_probs, y_val)
+    s_ll = _log_loss(smooth_probs, y_val)
+
+    # How many rows is the raw baseline structurally unable to score? Each
+    # is clipped to 1e-12 (27.6 nats) while the masked model can never be.
+    n_zero = int((prior_probs[np.arange(len(y_val)), y_val] == 0).sum())
 
     out("=" * 50)
     out("EVALUATION (natural distribution)")
@@ -96,12 +133,30 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
             f"val_acc there {history['val_accuracy'][best]:.1%}")
 
     out("\nModel vs pitcher-prior baseline")
-    out("(baseline = this pitcher's training pitch mix, no game context)")
-    out(f"{'':<12}{'model':>10}{'baseline':>12}{'lift':>10}")
-    out(f"{'top-1':<12}{m_top1:>9.1%}{b_top1:>12.1%}{m_top1 - b_top1:>+10.1%}")
-    out(f"{'top-3':<12}{m_top3:>9.1%}{b_top3:>12.1%}{m_top3 - b_top3:>+10.1%}")
-    out(f"{'log-loss':<12}{m_ll:>10.4f}{b_ll:>12.4f}{b_ll - m_ll:>+10.4f}"
-        "   (positive = model better)")
+    out("(baseline = this pitcher's training pitch mix, no game context.")
+    out(" 'smoothed' backs off toward the league mix so the baseline cannot")
+    out(" be charged 27.6 nats for a pitch it never saw; the masked model")
+    out(" structurally never can be. Smoothed is the fair log-loss bar.)")
+    out(f"{'':<12}{'model':>10}{'prior':>10}{'lift':>9}"
+        f"{'smoothed':>11}{'lift':>9}")
+    out(f"{'top-1':<12}{m_top1:>9.1%}{b_top1:>10.1%}{m_top1 - b_top1:>+9.1%}"
+        f"{s_top1:>11.1%}{m_top1 - s_top1:>+9.1%}")
+    out(f"{'top-3':<12}{m_top3:>9.1%}{b_top3:>10.1%}{m_top3 - b_top3:>+9.1%}"
+        f"{s_top3:>11.1%}{m_top3 - s_top3:>+9.1%}")
+    out(f"{'log-loss':<12}{m_ll:>10.4f}{b_ll:>10.4f}{b_ll - m_ll:>+9.4f}"
+        f"{s_ll:>11.4f}{s_ll - m_ll:>+9.4f}   (positive = model better)")
+    out(f"\nRows the raw baseline scores as exactly 0 (clipped to 27.6 nats): "
+        f"{n_zero:,} ({n_zero / len(y_val):.3%})")
+    out(f"  Those alone move the raw log-loss lift by "
+        f"~{n_zero * 27.631 / len(y_val):.4f} nats.")
+
+    # Fastball-family vs rest — what most published work actually measures.
+    mb, yb = _binary_collapse(y_pred_probs, y_val, pitch_classes)
+    bb, _ = _binary_collapse(prior_probs, y_val, pitch_classes)
+    out("\nFastball-family (FF/SI/FC) vs rest — comparable to published work,")
+    out("most of which reports this binary task rather than 10-class:")
+    out(f"  model {(mb == yb).mean():.1%}   baseline {(bb == yb).mean():.1%}"
+        f"   lift {(mb == yb).mean() - (bb == yb).mean():+.1%}")
 
     present = sorted(set(y_val.tolist()) | set(y_pred.tolist()))
     present_names = [pitch_classes[i] for i in present]

@@ -82,20 +82,31 @@ baseline is what you can predict knowing only who is on the mound, so
 features do anything at all**. 10-class top-1 reads lower than the old
 4-bucket numbers; that is expected and not a regression.
 
-## Current status (2026-09-18)
+## Current status (2026-09-23)
 
-- **Run 6 (uniform alpha) is the best model so far: top-1 48.9%, top-3
-  92.1%, log-loss 1.1531 vs prior 1.3221 — lift +6.1 / +6.2 / +0.169.**
-  The context features demonstrably carry signal. Trade-off: minority
-  recall dropped (CU 13.5%, KC 21.0%) as the model leans on FF/SI when
-  uncertain; macro-F1 0.422 vs run 5's 0.449.
-- **Run 7 is queued**: `ALPHA_POWER` 0.0 → 0.25, a midpoint probe
-  (3.6:1 weight ratio). Training-only — `./run_pipeline.sh` suffices.
-  **This is the last alpha round**; `docs/EXPERIMENTS.md` carries the
-  decision rule for keeping 0.25 vs reverting to run 6's 0.0.
-- After run 7: lock the model and build the Flask site. The product is
-  the arsenal-masked calibrated distribution (top-3 ≈92%), not the
-  argmax. Do not reopen the alpha search.
+- **Alpha search is CLOSED.** Runs 5/6/7 (ALPHA_POWER 0.5 / 0.0 / 0.25) moved
+  log-loss only 0.033 nats while moving top-1 4.9 points — a decision-threshold
+  frontier, not an information gain. Run 6 (top-1 48.9%, log-loss 1.1531) is
+  best on calibration; run 7 (47.4%, 1.1650, macro-F1 0.457) is best balanced.
+  Do not reopen it.
+- **A 5-dimension audit refuted the "model guesses from all pitch types"
+  hypothesis** — the mask is applied at evaluation, and the prior baseline is
+  itself arsenal-constrained, so the reported lift was always within-arsenal.
+  See the post-run-7 section of `docs/EXPERIMENTS.md` for the full findings.
+- **Open defects, in priority order** (also in EXPERIMENTS.md):
+  1. CRITICAL — the random per-pitch split leaves validation rows dependent on
+     training rows (same at-bat, same outing). Est. 1-4 points of top-1
+     inflation. Fixing means a grouped/temporal split and a retrain, and the
+     honest number will read LOWER.
+  2. HIGH — the arsenal mask is built over train+val, so the true validation
+     label can never be zeroed; contaminates log-loss.
+  3. MEDIUM — mask threshold is a raw count, not a usage share, so starters'
+     masks approach all-ones.
+- **Reality check**: realistic ceiling is 52-56% top-1; top-3 at ~92% is within
+  2-3 points of any achievable ceiling. Lead with top-3 and the fastball-family
+  binary number, not 10-class top-1.
+- `diagnose_arsenal.py` measures items 2-3 empirically from `data_v5/` in
+  seconds. Run it before acting on them.
 
 ## Conventions
 
