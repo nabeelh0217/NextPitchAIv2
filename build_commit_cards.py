@@ -42,7 +42,10 @@ from evaluate_model import (
 # larger than any cell that exists — the first version used 120 and
 # returned zero rules for that reason alone. Use a significance test
 # instead: a small cell can still earn a rule if the effect is large.
+MIN_CELL = 60        # held-out pitches in the situation; the rule is
+                     # scored over ALL of them, not a confident subset
 MIN_SPOKE = 25       # floor below which no test is meaningful
+MIN_TRAIN = 40       # training pitches needed to trust a count-split rate
 Z_CRIT = 1.645       # one-sided 95%: the rule really beats the scouting report
 MIN_CONF = 0.65      # the commit threshold the gate found actionable
 MIN_ACC = 0.70       # a hitter following the rule is right this often
@@ -147,12 +150,11 @@ def main():
 
     # Counts: ctx cols 0/1 are standardized balls/strikes; StandardScaler
     # preserves rank, so sorted unique values recover the original levels.
-    def levels(col):
-        u = sorted(np.unique(X["ctx"][idx_val, col]))
-        return {v: i for i, v in enumerate(u)}
-    b_lv, s_lv = levels(0), levels(1)
-    balls = np.array([b_lv[v] for v in X["ctx"][idx_val, 0]])
-    strikes = np.array([s_lv[v] for v in X["ctx"][idx_val, 1]])
+    # Reuse the SAME level maps the training counts were built with, or a
+    # cell lookup can silently index the wrong count.
+    balls = np.array([b_all[v] for v in X["ctx"][idx_val, 0]])
+    strikes = np.array([s_all[v] for v in X["ctx"][idx_val, 1]])
+    b_lv, s_lv = b_all, s_all
 
     print("Mining situations...")
     cards = defaultdict(list)
@@ -167,50 +169,62 @@ def main():
                     if h is not None:
                         m = m & (bhand == h)
                     n = int(m.sum())
-                    # Only the pitches we'd actually speak on.
-                    spoke = m & (hard_conf >= MIN_CONF)
-                    ns = int(spoke.sum())
-                    if ns < MIN_SPOKE:
+                    if n < MIN_CELL:
                         continue
 
-                    # The rule a hitter memorizes: "in this spot, sit X."
-                    lean = int(p_hard[spoke].mean() >= 0.5)
-                    # It is only a rule if the confident calls agree.
-                    consistency = float((hard_pred[spoke] == lean).mean())
+                    # A card instructs the hitter to sit on EVERY pitch in
+                    # this situation — he cannot know in the box which ones
+                    # the model would have flagged. So the rule must be
+                    # scored over the whole cell. Scoring it on the
+                    # model-confident subset instead lets the model pick
+                    # the sample its own baseline is judged on, which
+                    # manufactured +65% "edges" in the first card run.
+                    lean = int(p_hard[m].mean() >= 0.5)
+                    consistency = float((hard_pred[m] == lean).mean())
                     if consistency < MIN_CONSISTENCY:
                         continue
 
-                    # Accuracy of FOLLOWING THE RULE, not of the model's
-                    # per-pitch call — that is what the hitter experiences.
-                    acc = float((hard_true[spoke] == lean).mean())
-
-                    # Bar: the count-split scouting report for this pitcher.
+                    # The scouting report's call for the same situation.
                     tot = cnt_tot[p, b, s]
-                    rate = (cnt_hard[p, b, s] / tot if tot >= 20
+                    rate = (cnt_hard[p, b, s] / tot if tot >= MIN_TRAIN
                             else overall_hard_rate[p])
                     prior_lean = int(rate >= 0.5)
-                    pacc = float((hard_true[spoke] == prior_lean).mean())
+
+                    # A card is only worth printing if it CONTRADICTS the
+                    # report. If it agrees, the hitter already had it.
+                    if lean == prior_lean:
+                        continue
+
+                    acc = float((hard_true[m] == lean).mean())
+                    pacc = 1.0 - acc     # they disagree, so this is exact
                     edge = acc - pacc
                     if acc < MIN_ACC or edge < MIN_EDGE:
                         continue
-                    # Is the rule significantly better than the scouting
-                    # report, or just a small cell landing well?
-                    se = np.sqrt(max(pacc * (1 - pacc), 1e-9) / ns)
-                    z = (acc - pacc) / se
+
+                    # Since the two sides disagree, the real question is
+                    # whether the card's side is genuinely the majority.
+                    z = (acc - 0.5) / np.sqrt(0.25 / n)
                     if z < Z_CRIT:
                         continue
+
+                    # Supplementary: how it does on the confident subset.
+                    spoke = m & (hard_conf >= MIN_CONF)
+                    ns = int(spoke.sum())
+                    acc_conf = (float((hard_true[spoke] == lean).mean())
+                                if ns else float("nan"))
 
                     # Name the likeliest pitch WITHIN the family we are
                     # telling him to sit on, or the advice contradicts
                     # itself ("sit soft, likeliest fastball").
-                    mean_p = probs[spoke].mean(0)
+                    mean_p = probs[m].mean(0)
                     side = np.where(fam == lean)[0]
                     top = int(side[mean_p[side].argmax()])
                     cards[int(p)].append({
                         "count": f"{b}-{s}",
                         "batter_hand": HAND.get(int(h), str(h)) if h is not None else "ALL",
                         "n": n,
-                        "advised_pct": float(spoke.sum() / n),
+                        "n_confident": ns,
+                        "acc_confident": acc_conf,
                         "sit": "HARD" if lean == 1 else "SOFT",
                         "likeliest_pitch": classes[top],
                         "accuracy": acc,
@@ -236,15 +250,24 @@ def main():
     out("COMMIT CARDS — situations worth sitting on")
     out("=" * 74)
     out("")
-    out(f"Every rule below cleared all bars on HELD-OUT pitches:")
-    out(f"  >= {MIN_SPOKE} pitches where the model was confident, and the")
-    out(f"     improvement significant at one-sided 95% (z >= {Z_CRIT})")
-    out(f"  >= {MIN_ACC:.0%} right for a hitter who FOLLOWS THE RULE, on")
-    out(f"     pitches where the model is {MIN_CONF:.0%}+ confident")
-    out(f"  >= +{MIN_EDGE:.0%} better than this pitcher's COUNT-SPLIT scouting")
-    out(f"     report (not his overall mix — scouts already have that)")
-    out(f"  >= {MIN_CONSISTENCY:.0%} of the confident calls agreeing, so it is")
-    out(f"     a rule and not noise inside the count")
+    out("Every rule below is a spot where the model CONTRADICTS the")
+    out("count-split scouting report — and is right to. Scored over every")
+    out("pitch in the situation, not a subset the model picked.")
+    out("")
+    out("  'card'    how often sitting as the card says is right")
+    out("  'report'  how often the scouting report is right in that spot")
+    out("  '(conf)'  same rule, restricted to pitches the model flags —")
+    out("            for a live tool; a hitter in the box cannot use it")
+    out("")
+    out("card + report always sum to 100%: they are opposing constant calls")
+    out("on the same pitches. That is arithmetic, not a coincidence — the")
+    out("card's claim is simply that the report is on the wrong side here.")
+    out("")
+    out(f"Bars: >= {MIN_CELL} held-out pitches in the situation, card right")
+    out(f"  >= {MIN_ACC:.0%} of the time, significant at one-sided 95% "
+        f"(z >= {Z_CRIT})")
+    out(f"  and >= {MIN_CONSISTENCY:.0%} of the model's calls in the cell agree,")
+    out(f"  so it is a rule and not noise inside the count.")
     out("")
     out("SIT HARD = gear up for velocity (four-seam / sinker / cutter).")
     out("SIT SOFT = stay back (slider / curve / change / split).")
@@ -262,11 +285,13 @@ def main():
         out(f"{label}")
         out("-" * 74)
         out(f"{'count':>7}{'vs':>8}{'sit':>7}{'likeliest':>11}"
-            f"{'acc':>8}{'base':>8}{'edge':>8}{'pitches':>9}")
-        for r in sorted(rules, key=lambda r: -r["edge"]):
+            f"{'card':>7}{'report':>8}{'pitches':>9}{'(conf)':>9}")
+        for r in sorted(rules, key=lambda r: -r["accuracy"]):
+            cf = (f"{r['acc_confident']:.0%}" if r['acc_confident'] == r['acc_confident']
+                  else "-")
             out(f"{r['count']:>7}{r['batter_hand']:>8}{r['sit']:>7}"
-                f"{r['likeliest_pitch']:>11}{r['accuracy']:>8.0%}"
-                f"{r['base_rate']:>8.0%}{r['edge']:>+8.0%}{r['n']:>9,}")
+                f"{r['likeliest_pitch']:>11}{r['accuracy']:>7.0%}"
+                f"{r['base_rate']:>8.0%}{r['n']:>9,}{cf:>9}")
 
     if not cards:
         out("")
@@ -279,8 +304,9 @@ def main():
     print(text)
     (DATA_DIR / "commit_cards_v5.txt").write_text(text + "\n")
     payload = {
-        "thresholds": {"min_n": MIN_N, "min_conf": MIN_CONF,
-                       "min_acc": MIN_ACC, "min_edge": MIN_EDGE},
+        "thresholds": {"min_cell": MIN_CELL, "min_conf": MIN_CONF,
+                       "min_acc": MIN_ACC, "min_edge": MIN_EDGE,
+                       "z_crit": Z_CRIT, "temperature": temp},
         "pitchers": [
             {"pitcher_id": p, "mlbam": int(inv.get(p, -1)),
              "name": names.get(int(inv.get(p, -1))), "rules": r}

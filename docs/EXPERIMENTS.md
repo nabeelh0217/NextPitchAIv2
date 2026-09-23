@@ -249,3 +249,35 @@ threshold. No cell could ever qualify. Replaced with:
   a rule when the effect is large and a big cell cannot coast on noise.
 - Batter-hand split is now **off by default** (`--by-hand` to enable); it
   thins every cell 3x and only survives for the highest-volume starters.
+
+## First real card run (2026-09-23) — and the selection bug it exposed
+
+Temperature calibration on real data fitted **T = 0.800** (sharpened),
+confirming the under-confidence the calibration table showed.
+
+The run produced 7 rules, but every one reported accuracies summing to
+exactly 100% (82/18, 76/24, 72/28, ...). That was a **selection
+artifact**, not signal: the rule was scored only on pitches where the
+model was confident, so the model was choosing the very sample its
+baseline got judged on. A hitter in the box cannot know which pitches
+those are — the card tells him to sit on *every* pitch in the count.
+
+**Fix:** a rule is now scored over the entire (pitcher, count) cell.
+Consequences:
+
+- A card only prints when its call **contradicts** the count-split
+  scouting report. If the two agree, the hitter already had it and the
+  card adds nothing.
+- Because the card and the report are then opposing constant calls on the
+  same pitches, their accuracies necessarily sum to 100%. That is
+  arithmetic; the card's claim is that the report is on the wrong side.
+- Significance is now a test against a coin flip (is the card's side
+  really the majority?), over the full cell, with `MIN_CELL = 60`.
+- The confident-subset accuracy is retained as a separate `(conf)` column
+  — meaningful for a live tool, not for a memorizable card.
+
+Also fixed: `MIN_N` survived in the JSON payload after the rename and
+crashed the run after the text report had been written; and the
+count-level index maps for training and validation are now the same
+object, since two independently derived maps could silently index
+different counts.
