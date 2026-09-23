@@ -26,7 +26,7 @@ from sklearn.model_selection import train_test_split
 
 from evaluate_model import (
     DATA_DIR, SPLIT_SEED, SPLIT_TEST_SIZE, FASTBALL_FAMILY,
-    PRIOR_SMOOTHING, _smoothed,
+    PRIOR_SMOOTHING, _smoothed, fit_temperature, apply_temperature,
 )
 
 REPORT_PATH = DATA_DIR / "actionability_report_v5.txt"
@@ -83,6 +83,15 @@ def main():
         batch_size=2048, verbose=0)
 
     yv = y[idx_val]
+
+    # Focal loss leaves the model under-confident, which pushes pitches it
+    # actually knows below the commit threshold. Fit T on the first half,
+    # apply to all; one parameter, but keep the split honest anyway.
+    raw_probs = probs
+    half = len(yv) // 2
+    temp, _ = fit_temperature(probs[:half], yv[:half])
+    probs = apply_temperature(probs, temp)
+
     pred = probs.argmax(1)
     conf = probs.max(1)
     N = len(yv)
@@ -104,6 +113,23 @@ def main():
     prior = _smoothed(counts, totals, league)[X["pitcher_id"][idx_val]]
     prior_pred = prior.argmax(1)
     prior_hard = (prior[:, fam == 1].sum(1) >= 0.5).astype(int)
+
+    hdr(out, "0. CALIBRATION FIX")
+    out(f"Fitted temperature T = {temp:.3f} "
+        f"({'sharpened' if temp < 1 else 'softened'}).")
+    raw_hard = raw_probs[:, fam == 1].sum(1)
+    raw_conf = np.maximum(raw_hard, 1 - raw_hard)
+    cal_hard = probs[:, fam == 1].sum(1)
+    cal_conf = np.maximum(cal_hard, 1 - cal_hard)
+    out("")
+    out(f"{'commit @':>10}{'raw':>12}{'calibrated':>14}{'change':>10}")
+    for t in COMMIT_THRESHOLDS:
+        out(f"{t:>10.0%}{(raw_conf >= t).mean():>12.1%}"
+            f"{(cal_conf >= t).mean():>14.1%}"
+            f"{(cal_conf >= t).mean() - (raw_conf >= t).mean():>+10.1%}")
+    out("")
+    out("More pitches clearing the bar means more situations where the")
+    out("hitter gets advice — for free, with no retraining.")
 
     hdr(out, "1. CONFIDENCE STRATIFICATION — where is the read strong?")
     out("Binned by the model's top probability. 'hard/soft' is the binary")
@@ -167,8 +193,11 @@ def main():
     strikes = X["ctx"][idx_val, 1]
     b_lv = {v: i for i, v in enumerate(sorted(np.unique(balls)))}
     s_lv = {v: i for i, v in enumerate(sorted(np.unique(strikes)))}
-    out(f"{'count':>8}{'pitches':>10}{'hard/soft':>11}{'prior':>9}"
-        f"{'edge':>8}{'%hard':>8}")
+    out("'naive' = just sit whichever side is commoner in that count —")
+    out("what every hitter already knows. THAT is the bar that matters.")
+    out("")
+    out(f"{'count':>8}{'pitches':>10}{'model':>9}{'pitcher':>9}{'naive':>8}"
+        f"{'vs naive':>10}{'%hard':>8}")
     rows = []
     for bv, bi in b_lv.items():
         for sv, si in s_lv.items():
@@ -177,11 +206,17 @@ def main():
                 continue
             acc = (hard_pred[m] == hard_true[m]).mean()
             pacc = (prior_hard[m] == hard_true[m]).mean()
-            rows.append((f"{bi}-{si}", m.sum(), acc, pacc, acc - pacc,
-                         hard_true[m].mean()))
-    for r in sorted(rows, key=lambda r: -r[4]):
-        out(f"{r[0]:>8}{r[1]:>10,}{r[2]:>11.1%}{r[3]:>9.1%}"
-            f"{r[4]:>+8.1%}{r[5]:>8.1%}")
+            share = hard_true[m].mean()
+            naive = max(share, 1 - share)   # always sit the count majority
+            rows.append((f"{bi}-{si}", int(m.sum()), acc, pacc, naive,
+                         acc - naive, share))
+    for r in sorted(rows, key=lambda r: -r[5]):
+        out(f"{r[0]:>8}{r[1]:>10,}{r[2]:>9.1%}{r[3]:>9.1%}{r[4]:>8.1%}"
+            f"{r[5]:>+10.1%}{r[6]:>8.1%}")
+    out("")
+    best_counts = [r for r in sorted(rows, key=lambda r: -r[5])[:3]]
+    out("Strongest counts vs what the hitter already knows: "
+        + ", ".join(f"{r[0]} ({r[5]:+.1%})" for r in best_counts))
 
     hdr(out, "VERDICT")
     if best:

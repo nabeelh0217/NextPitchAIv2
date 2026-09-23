@@ -208,3 +208,44 @@ A rule additionally requires `MIN_CONSISTENCY` (70% of the confident calls
 in that cell agreeing). Without it a single "sit" label can be pasted over
 a situation where the model is confidently split, which is worse than
 silence.
+
+## Full gate report + first card run (2026-09-23)
+
+**Where the edge actually is.** Section 4 originally compared the model to
+the pitcher's *overall* hard/soft rate. Against the bar that matters —
+"just sit whichever side is commoner in this count", which every hitter
+already knows — the picture inverts:
+
+| count | model | naive | edge |
+|---|---|---|---|
+| 2-2 | 59.5% | 50.5% | **+9.0** |
+| 0-1 | 58.6% | 51.1% | **+7.5** |
+| 1-1 | 58.6% | 51.4% | **+7.2** |
+| 3-1 | 78.9% | 78.1% | +0.8 |
+| 3-0 | 94.5% | 95.1% | **-0.6** |
+
+The model adds nothing on 3-0 (everyone knows it is a fastball) and 7-9
+points in the ambiguous counts where the hitter is genuinely guessing.
+That is the ideal shape for a decision aid, and it is the opposite of what
+the pitcher-overall baseline suggested.
+
+**Calibration is badly off.** The model is systematically UNDER-confident —
+says 64%, right 84%; says 74%, right 93%. This is the known signature of
+focal loss, and it silently suppresses coverage by pushing pitches the
+model knows below the commit threshold. Fixed with one-parameter
+temperature scaling (`fit_temperature` / `apply_temperature` in
+`evaluate_model.py`), fitted on half the validation rows and applied to
+all. No retraining.
+
+**The first card run returned zero rules, and that was a bug, not a
+finding.** `MIN_N = 120` required 120 held-out pitches per
+(pitcher x count x batter-hand) cell, but validation is 20% of the data,
+so the average cell holds ~9 pitches and even a workhorse starter's
+largest cell lands near 150 — of which only ~31% clear the confidence
+threshold. No cell could ever qualify. Replaced with:
+
+- `MIN_SPOKE = 25` floor plus a **one-sided binomial test** (z >= 1.645)
+  against the count-split scouting report, so a small cell can still earn
+  a rule when the effect is large and a big cell cannot coast on noise.
+- Batter-hand split is now **off by default** (`--by-hand` to enable); it
+  thins every cell 3x and only survives for the highest-volume starters.

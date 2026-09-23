@@ -76,6 +76,40 @@ def _smoothed(counts, totals, league, sm=PRIOR_SMOOTHING):
     return (counts + sm * league) / (totals + sm)
 
 
+def fit_temperature(probs, y, grid=None):
+    """
+    One-parameter calibration. Focal loss leaves this model badly
+    UNDER-confident (it says 64% and is right 84%), which pushes pitches
+    it actually knows below any commit threshold. Rescaling the logits by
+    T<1 sharpens them back to honest.
+
+    Probabilities in, probabilities out: log(p) recovers the logits up to
+    a constant, which softmax is invariant to. Masked classes have p=0 ->
+    -inf, so they stay masked.
+    """
+    if grid is None:
+        grid = np.linspace(0.30, 2.00, 69)
+    logp = np.log(np.clip(probs, 1e-12, 1.0))
+    rows = np.arange(len(y))
+    best_t, best_nll = 1.0, np.inf
+    for t in grid:
+        z = logp / t
+        z = z - z.max(1, keepdims=True)
+        e = np.exp(z)
+        e /= e.sum(1, keepdims=True)
+        nll = float(-np.log(np.clip(e[rows, y], 1e-12, 1.0)).mean())
+        if nll < best_nll:
+            best_t, best_nll = float(t), nll
+    return best_t, best_nll
+
+
+def apply_temperature(probs, t):
+    z = np.log(np.clip(probs, 1e-12, 1.0)) / t
+    z = z - z.max(1, keepdims=True)
+    e = np.exp(z)
+    return e / e.sum(1, keepdims=True)
+
+
 def _binary_collapse(probs, y, classes):
     """Fastball-family vs rest: sum probability within each group."""
     fam = np.array([1 if c in FASTBALL_FAMILY else 0 for c in classes])

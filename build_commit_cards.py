@@ -32,17 +32,29 @@ from sklearn.model_selection import train_test_split
 
 from evaluate_model import (
     DATA_DIR, SPLIT_SEED, SPLIT_TEST_SIZE, FASTBALL_FAMILY, _smoothed,
+    fit_temperature, apply_temperature,
 )
 
 # A rule only earns a place on a card if it clears all three. These match
 # analyze_actionability.py — the gate that validated the model.
-MIN_N = 120          # enough held-out pitches for the cell to mean anything
+# Validation is 20% of the data, so a (pitcher x count x hand) cell holds
+# ~9 pitches on average. A fixed MIN_N large enough to trust is therefore
+# larger than any cell that exists — the first version used 120 and
+# returned zero rules for that reason alone. Use a significance test
+# instead: a small cell can still earn a rule if the effect is large.
+MIN_SPOKE = 25       # floor below which no test is meaningful
+Z_CRIT = 1.645       # one-sided 95%: the rule really beats the scouting report
 MIN_CONF = 0.65      # the commit threshold the gate found actionable
 MIN_ACC = 0.70       # a hitter following the rule is right this often
 MIN_EDGE = 0.02      # and beats the count-split scouting report
 MIN_CONSISTENCY = 0.70   # the confident calls must agree with each other,
 # or it is not a rule anyone can memorize — it is situation-dependent
 # noise inside the count, and a single "sit" label would mislead.
+
+# Splitting by batter hand thins every cell 3x. Off by default; the hand
+# split only survives for the highest-volume starters.
+BY_HAND = "--by-hand" in sys.argv
+CALIBRATE = "--raw" not in sys.argv
 
 HAND = {0: "RHB", 1: "LHB", 2: "SWITCH"}
 
@@ -87,6 +99,16 @@ def main():
                           batch_size=2048, verbose=0)
 
     yv = y[idx_val]
+    if CALIBRATE:
+        # Fit T on the first half, apply to all: one parameter over
+        # hundreds of thousands of rows, but keep the split honest anyway.
+        half = len(yv) // 2
+        temp, _ = fit_temperature(probs[:half], yv[:half])
+        probs = apply_temperature(probs, temp)
+        print(f"Temperature calibration: T={temp:.3f} "
+              f"({'sharpened' if temp < 1 else 'softened'})")
+    else:
+        temp = 1.0
     pid = X["pitcher_id"][idx_val]
     bhand = X["batter_hand"][idx_val]
 
@@ -140,14 +162,15 @@ def main():
         pm = pid == p
         for b in range(max(b_lv.values()) + 1):
             for s in range(max(s_lv.values()) + 1):
-                for h in np.unique(bhand[pm]):
-                    m = pm & (balls == b) & (strikes == s) & (bhand == h)
+                for h in (np.unique(bhand[pm]) if BY_HAND else [None]):
+                    m = pm & (balls == b) & (strikes == s)
+                    if h is not None:
+                        m = m & (bhand == h)
                     n = int(m.sum())
-                    if n < MIN_N:
-                        continue
                     # Only the pitches we'd actually speak on.
                     spoke = m & (hard_conf >= MIN_CONF)
-                    if spoke.sum() < MIN_N // 2:
+                    ns = int(spoke.sum())
+                    if ns < MIN_SPOKE:
                         continue
 
                     # The rule a hitter memorizes: "in this spot, sit X."
@@ -170,6 +193,12 @@ def main():
                     edge = acc - pacc
                     if acc < MIN_ACC or edge < MIN_EDGE:
                         continue
+                    # Is the rule significantly better than the scouting
+                    # report, or just a small cell landing well?
+                    se = np.sqrt(max(pacc * (1 - pacc), 1e-9) / ns)
+                    z = (acc - pacc) / se
+                    if z < Z_CRIT:
+                        continue
 
                     # Name the likeliest pitch WITHIN the family we are
                     # telling him to sit on, or the advice contradicts
@@ -179,7 +208,7 @@ def main():
                     top = int(side[mean_p[side].argmax()])
                     cards[int(p)].append({
                         "count": f"{b}-{s}",
-                        "batter_hand": HAND.get(int(h), str(h)),
+                        "batter_hand": HAND.get(int(h), str(h)) if h is not None else "ALL",
                         "n": n,
                         "advised_pct": float(spoke.sum() / n),
                         "sit": "HARD" if lean == 1 else "SOFT",
@@ -188,6 +217,7 @@ def main():
                         "base_rate": pacc,
                         "edge": edge,
                         "consistency": consistency,
+                        "z": float(z),
                     })
 
     # Rank pitchers by how much total edge their card carries.
@@ -206,8 +236,9 @@ def main():
     out("COMMIT CARDS — situations worth sitting on")
     out("=" * 74)
     out("")
-    out(f"Every rule below cleared all three bars on HELD-OUT pitches:")
-    out(f"  >= {MIN_N} pitches in the situation")
+    out(f"Every rule below cleared all bars on HELD-OUT pitches:")
+    out(f"  >= {MIN_SPOKE} pitches where the model was confident, and the")
+    out(f"     improvement significant at one-sided 95% (z >= {Z_CRIT})")
     out(f"  >= {MIN_ACC:.0%} right for a hitter who FOLLOWS THE RULE, on")
     out(f"     pitches where the model is {MIN_CONF:.0%}+ confident")
     out(f"  >= +{MIN_EDGE:.0%} better than this pitcher's COUNT-SPLIT scouting")
@@ -239,9 +270,10 @@ def main():
 
     if not cards:
         out("")
-        out("No situation cleared the bar. The model's edge is real in")
-        out("aggregate but too diffuse to localize into per-pitcher rules —")
-        out("try loosening MIN_N, or present the aggregate gate instead.")
+        out("No situation cleared the bar. The aggregate edge is real but")
+        out("too diffuse to localize per pitcher. Try --by-hand off (already")
+        out("default), or fall back to the LEAGUE-WIDE count rules, which the")
+        out("actionability report shows are strongest in 2-2, 0-1 and 1-1.")
 
     text = "\n".join(lines)
     print(text)
