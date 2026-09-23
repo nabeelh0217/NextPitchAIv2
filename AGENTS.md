@@ -13,6 +13,29 @@ The softmax is **masked to the pitcher's real arsenal inside the model**,
 so it can only ever predict pitches that pitcher actually throws. A Flask
 website (`site/`, not yet built) will serve these predictions.
 
+## The goal is a hitter's edge, NOT top-1 accuracy
+
+Read this before proposing any modeling change. The project's purpose is
+to give a batter a real advantage in the box. That makes most of the
+obvious metrics misleading:
+
+- A hitter has ~400ms and decides **gear up vs stay back**, and **where**.
+  He cannot act on a 10-way distribution. The binary fastball-family call
+  is the decision; the 10-class argmax is not.
+- **Flat average accuracy is the wrong statistic.** What matters is: in
+  what fraction of pitches is the read strong enough to COMMIT, and how
+  right are we there? 47% everywhere is useless; 47% overall but 80%
+  inside a confident 15% is a product.
+- **Accuracy without edge is worthless.** The bar is not "is the model
+  right" but "does it beat the scouting report the hitter already has" —
+  i.e. that pitcher's own base rate for the situation. A model at 77%
+  where the base rate is 78% has negative value. `analyze_actionability.py`
+  exists because this trap is easy to walk into.
+
+`analyze_actionability.py` is the gate: it requires >=10% of pitches
+advised, >=70% accuracy there, AND >=+2 points over the pitcher's base
+rate. Run it before any further modeling work.
+
 ## File map
 
 | Path | Role |
@@ -21,6 +44,8 @@ website (`site/`, not yet built) will serve these predictions.
 | `02_preprocess.py` | Leakage-free feature engineering → `data_v5/` arrays, scalers, ID maps, website artifacts |
 | `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` + `eval_report_v5.txt` |
 | `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining). `03_train.py` imports its `build_report` so the two can't drift |
+| `analyze_actionability.py` | **The product gate.** Confidence stratification, calibration, and the commit-slice edge over the pitcher's base rate. No retraining. Run this before any modeling change |
+| `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |
 | `.cursor/rules/` | Cursor-scoped rules (point back here) |

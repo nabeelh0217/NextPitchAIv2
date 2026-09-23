@@ -146,3 +146,36 @@ log-loss 1.3221.
 | `56ec22a` | Runner validates an existing `.venv`'s interpreter and rebuilds it if incompatible — a stale venv from a failed run was being silently reused. |
 | `5bd31a6` | Scrape writes to `.tmp` then `os.replace`; runner treats a parquet < 1 MB as corrupt and re-scrapes. An interrupted write left a 0-byte file that was trusted as complete. |
 | `f7ecd13` | Sequences grouped by `(game_pk, pitcher)`. |
+
+## Reframe (2026-09-23): the goal is a hitter's edge, not top-1
+
+Runs 1-7 optimized accuracy. Against the project's actual purpose — a
+batter gaining an advantage — accuracy was never the right target, and the
+entropy analysis shows it is now exhausted anyway (run 6 sits within 0.02
+nats of what a pitcher throwing an ordinary 4-pitch mix leaves on the
+table; pitcher identity alone carries 78% of all extractable information).
+
+**What changed:**
+
+- The decision a hitter makes is **gear up vs stay back**, and **where** —
+  not which of 10 pitch types. The binary fastball-family call is the
+  product surface; the 10-class argmax is supporting detail.
+- The headline metric is the **commit slice**: of the pitches where the
+  read is strong enough to act on, how many are there and how right are we?
+- **The bar is edge over the pitcher's own base rate**, not raw accuracy.
+  A model at 77% where the scouting report already gets 78% has negative
+  value. `analyze_actionability.py` enforces this: >=10% of pitches
+  advised, >=70% accuracy, >=+2pts edge. It was validated against the
+  synthetic dataset (where pitch types are drawn independently of context)
+  and correctly returns NOT ACTIONABLE there, diagnosing "77.2% accuracy
+  but the base rate already gets 78.4%".
+
+**Known gap found during the reframe:** `build_pitch_features` puts the
+type, velocity, location and movement of the previous 8 pitches into the
+sequence but **not their outcomes**. `description` is used only for the
+batter's season-long whiff profile. The model cannot distinguish "just
+swung through a slider" from "fouled off three fastballs" — a first-order
+sequencing signal. Adding a per-timestep outcome one-hot (ball / called
+strike / swinging strike / foul / in-play) is the highest-prior feature
+change available, and the next thing to try if the gate says the current
+model has no edge.
