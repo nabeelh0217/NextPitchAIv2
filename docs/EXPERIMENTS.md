@@ -281,3 +281,44 @@ crashed the run after the text report had been written; and the
 count-level index maps for training and validation are now the same
 object, since two independently derived maps could silently index
 different counts.
+
+## Zero cards (2026-09-23) — and the question it raises
+
+With honest full-cell scoring, **no (pitcher, count) cell** had a constant
+call that contradicts the count-split scouting report and beats it. Zero
+rules.
+
+That is not "the model is worthless" — it is inconsistent with the
+aggregate numbers unless you read it carefully:
+
+- aggregate: **+5.2%** edge at a 65% commit threshold, on 31% of pitches
+- per count vs naive: **+9.0** (2-2), **+7.5** (0-1), **+7.2** (1-1)
+- per (pitcher, count) constant rule: **nothing**
+
+All three are consistent with one explanation: the model's value lies in
+distinguishing *which pitches within a situation* will be soft, not in
+shifting the situation's overall majority. A card that says "Lugo, 2-2:
+always sit soft" discards exactly that — it forces one answer per
+situation, which is the one thing the model is not contributing.
+
+**Section 5 of `analyze_actionability.py` now tests this directly.** For
+every cell it compares the model's varying call against two constant
+rules:
+
+- **scout** — the majority side learned from TRAINING rows, scored on
+  validation. Fair, out-of-sample, and what a real report would say.
+- **oracle** — the best constant rule fitted on the validation rows
+  themselves. Nobody could write it in advance; losing to it slightly is
+  not a failure.
+
+The verdict is explicit:
+
+- **POSITIVE lift vs scout** -> the model knows things no static card can
+  carry. Build a live lookup, not a card.
+- **FLAT** -> ship the static table; it is simpler, needs no model at
+  serve time, and is honest.
+- **NEGATIVE** -> the network is not earning its keep over a table.
+
+Validated on the synthetic negative control, where context carries no
+signal: it correctly returns NEGATIVE (-3.7% vs scout, model winning only
+10% of cells) and recommends shipping the table.

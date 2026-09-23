@@ -43,6 +43,10 @@ MIN_EDGE = 0.02    # and BEATS the scouting report he already has.
 # worthless if the base rate already gives it to him for free.
 CONF_BINS = [0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.01]
 
+# Minimum held-out pitches in a (pitcher, count) cell before its
+# within-situation lift means anything.
+MIN_CELL_LIFT = 60
+
 
 def hdr(out, title):
     out("")
@@ -83,6 +87,7 @@ def main():
         batch_size=2048, verbose=0)
 
     yv = y[idx_val]
+    pid = X["pitcher_id"][idx_val]
 
     # Focal loss leaves the model under-confident, which pushes pitches it
     # actually knows below the commit threshold. Fit T on the first half,
@@ -217,6 +222,102 @@ def main():
     best_counts = [r for r in sorted(rows, key=lambda r: -r[5])[:3]]
     out("Strongest counts vs what the hitter already knows: "
         + ", ".join(f"{r[0]} ({r[5]:+.1%})" for r in best_counts))
+
+    hdr(out, "5. WITHIN-SITUATION LIFT — can a static card ever capture this?")
+    out("For each (pitcher, count) cell, compare the model's VARYING call")
+    out("against the best possible CONSTANT rule for that cell — i.e. the")
+    out("strongest scouting report anyone could write, scored on the same")
+    out("held-out pitches it is being graded against (generous to the bar).")
+    out("")
+    out("If the model wins here, its edge is WITHIN situations, and no")
+    out("memorizable card can carry it — the product must be a live lookup.")
+    out("")
+    # `balls`/`strikes` hold STANDARDIZED values here; map to 0..3 levels
+    # before comparing, or nothing ever matches.
+    balls_i = np.array([b_lv[v] for v in balls])
+    strikes_i = np.array([s_lv[v] for v in strikes])
+
+    # Two constant rules to beat:
+    #  - "scout": derived from TRAINING rows, scored on validation. This is
+    #    the fair, out-of-sample bar and the one a real report would give.
+    #  - "oracle": the best constant rule fitted on the validation rows
+    #    themselves. Nobody could write it in advance; it is an upper
+    #    bound, and losing to it slightly is not a failure.
+    n_pid_a = int(X["pitcher_id"].max()) + 1
+    nb, ns_ = max(b_lv.values()) + 1, max(s_lv.values()) + 1
+    bt = np.array([b_lv[v] for v in X["ctx"][idx_tr, 0]])
+    st = np.array([s_lv[v] for v in X["ctx"][idx_tr, 1]])
+    ht = fam[y[idx_tr]]
+    ch = np.zeros((n_pid_a, nb, ns_))
+    ct = np.zeros((n_pid_a, nb, ns_))
+    np.add.at(ch, (X["pitcher_id"][idx_tr], bt, st), ht)
+    np.add.at(ct, (X["pitcher_id"][idx_tr], bt, st), 1.0)
+
+    tot_n = tot_model = tot_const = tot_scout = 0
+    cell_wins = cell_total = 0
+    per_count = {}
+    for p in np.unique(X["pitcher_id"][idx_val]):
+        if p == 0:
+            continue
+        pm = pid == p
+        for b in range(max(b_lv.values()) + 1):
+            for s in range(max(s_lv.values()) + 1):
+                m = pm & (balls_i == b) & (strikes_i == s)
+                n = int(m.sum())
+                if n < MIN_CELL_LIFT:
+                    continue
+                share = hard_true[m].mean()
+                const = max(share, 1 - share)          # oracle static rule
+                mod = float((hard_pred[m] == hard_true[m]).mean())
+                # Scout: majority side learned from TRAINING rows only.
+                tt = ct[p, b, s]
+                rate = (ch[p, b, s] / tt) if tt >= 40 else share
+                scout_lean = int(rate >= 0.5)
+                scout = float((hard_true[m] == scout_lean).mean())
+                tot_n += n
+                tot_model += mod * n
+                tot_const += const * n
+                tot_scout += scout * n
+                cell_total += 1
+                cell_wins += int(mod > scout)
+                k = f"{b}-{s}"
+                a, c, sc, nn = per_count.get(k, (0.0, 0.0, 0.0, 0))
+                per_count[k] = (a + mod * n, c + const * n,
+                                sc + scout * n, nn + n)
+    if tot_n:
+        mm = tot_model / tot_n
+        cc = tot_const / tot_n
+        ss = tot_scout / tot_n
+        out(f"Cells with >={MIN_CELL_LIFT} held-out pitches: {cell_total:,} "
+            f"covering {tot_n:,} pitches")
+        out(f"  model (varying call)         {mm:.1%}")
+        out(f"  scout constant (from train)  {ss:.1%}   <- the fair bar")
+        out(f"  oracle constant (fit on val) {cc:.1%}   <- upper bound")
+        out(f"  LIFT vs scout                {mm - ss:+.1%}")
+        out(f"  gap to oracle                {mm - cc:+.1%}")
+        out(f"  cells where model beats scout {cell_wins}/{cell_total} "
+            f"({cell_wins/max(cell_total,1):.0%})")
+        se = np.sqrt(0.25 / tot_n)
+        out(f"  (a +/-{1.96*se:.2%} band is noise at this sample size)")
+        out("")
+        out(f"{'count':>8}{'pitches':>10}{'model':>9}{'scout':>9}"
+            f"{'lift':>8}{'oracle':>9}")
+        for k, (a, c, sc, nn) in sorted(
+                per_count.items(), key=lambda kv: -(kv[1][0] - kv[1][2])):
+            out(f"{k:>8}{nn:>10,}{a/nn:>9.1%}{sc/nn:>9.1%}"
+                f"{(a-sc)/nn:>+8.1%}{c/nn:>9.1%}")
+        out("")
+        if mm - ss > 1.96 * se:
+            out("POSITIVE within-situation lift: the model knows things a")
+            out("static card cannot carry. Build a LIVE lookup, not a card.")
+        elif mm - ss < -1.96 * se:
+            out("NEGATIVE: a constant per-situation rule beats the model.")
+            out("Ship the scouting table; the network is not earning its keep.")
+        else:
+            out("FLAT: the model matches a good static table. Ship the table —")
+            out("it is simpler, needs no model at serve time, and is honest.")
+    else:
+        out(f"No cell had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
 
     hdr(out, "VERDICT")
     if best:
