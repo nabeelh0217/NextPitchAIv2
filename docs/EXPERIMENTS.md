@@ -322,3 +322,64 @@ The verdict is explicit:
 Validated on the synthetic negative control, where context carries no
 signal: it correctly returns NEGATIVE (-3.7% vs scout, model winning only
 10% of cells) and recommends shipping the table.
+
+## Section 5 result (2026-09-23): the model is at table parity
+
+Full gate on the run-7 model, after temperature calibration (T = 0.800,
+which bought +2.7pts of coverage at the 65% threshold for free):
+
+```
+model (varying call)          61.5%
+scout constant (from train)   60.9%    lift +0.7%
+oracle constant (fit on val)  61.6%    gap  -0.1%
+cells where model beats scout  928/2048 (45%)
+```
+
+**The honest verdict is table parity, not a live-model win**, for two
+reasons the first version of the verdict logic missed:
+
+1. The model beats the count-split scouting table in only **45% of
+   situations** — worse than a coin flip. The positive aggregate comes
+   from winning bigger where it wins, not from winning broadly. That is
+   not a dependable per-situation edge.
+2. It does not exceed the **oracle** constant rule; it sits exactly on it
+   (-0.1%). Matching the best constant per cell means the model is only
+   choosing the right constant — which a table encodes just as well.
+
+The verdict logic now requires all three of: significant lift over scout,
+a >50% cell win rate, AND beating the oracle. Otherwise it recommends
+shipping the table.
+
+### Where the headline edge actually went
+
+Sections 1-4 compare against the pitcher's **overall** mix, which ignores
+the count. Section 5's bar is **count-split**. The difference is the
+whole story:
+
+| baseline | model edge |
+|---|---|
+| pitcher's overall mix (§3, 65% threshold) | +5.9% |
+| league count majority (§4, 2-2) | +9.5% |
+| **pitcher's count-split table (§5)** | **+0.7%** |
+
+Nearly all of the apparent edge is "the model knows about counts" — which
+every hitter already does. Against a properly built pitcher x count
+table, the model adds +0.7%.
+
+That +0.7% is real and significant over 243K pitches, and it is worth
+capturing: build the table from the **model's** per-cell call rather than
+from raw training frequencies. It ships with no TensorFlow at serve time.
+
+### The one experiment that could change this
+
+Within-cell lift of ~0 is exactly what you would expect if the sequence
+branch carries no information beyond what the count already encodes —
+and `build_pitch_features` omits the OUTCOME of each previous pitch
+(ball / called strike / swinging strike / foul / in-play). The model
+cannot tell "just swung through a slider" from "fouled off three
+fastballs".
+
+That is a falsifiable hypothesis: add the outcome one-hot per timestep,
+retrain, and re-run section 5. If within-cell lift and the cell win rate
+move, the model earns a live deployment. If they do not, ship the table
+and stop.

@@ -307,15 +307,45 @@ def main():
             out(f"{k:>8}{nn:>10,}{a/nn:>9.1%}{sc/nn:>9.1%}"
                 f"{(a-sc)/nn:>+8.1%}{c/nn:>9.1%}")
         out("")
-        if mm - ss > 1.96 * se:
+        # An aggregate lift can be positive while the model loses in most
+        # cells — it just wins bigger where it wins. For the edge to be
+        # genuinely WITHIN-situation it must also (a) win in more than
+        # half the cells and (b) beat the best constant rule, not merely
+        # match it. Matching the oracle means the model is only picking
+        # the right constant, which a table can do just as well.
+        win_rate = cell_wins / max(cell_total, 1)
+        beats_scout = mm - ss > 1.96 * se
+        beats_oracle = mm - cc > 1.96 * se
+        broad = win_rate > 0.50
+        if beats_scout and broad and beats_oracle:
             out("POSITIVE within-situation lift: the model knows things a")
             out("static card cannot carry. Build a LIVE lookup, not a card.")
+        elif beats_scout and not broad:
+            out(f"NOT BROAD: aggregate lift is +{mm-ss:.1%} but the model beats")
+            out(f"the scouting table in only {win_rate:.0%} of situations — it")
+            out("wins bigger where it wins and loses elsewhere. That is not a")
+            out("dependable per-situation edge.")
+            out("")
+            out("SHIP THE TABLE, built from the model's per-cell call rather")
+            out("than from raw frequencies — that is where the lift lives, and")
+            out("it needs no model at serve time.")
+        elif beats_scout and not beats_oracle:
+            out(f"AT ORACLE PARITY: the model matches the best CONSTANT rule")
+            out(f"per situation ({mm - cc:+.1%} vs oracle) but does not exceed")
+            out("it, so its within-situation variation adds nothing a table")
+            out("cannot encode. Ship the table.")
         elif mm - ss < -1.96 * se:
             out("NEGATIVE: a constant per-situation rule beats the model.")
             out("Ship the scouting table; the network is not earning its keep.")
         else:
             out("FLAT: the model matches a good static table. Ship the table —")
             out("it is simpler, needs no model at serve time, and is honest.")
+        out("")
+        out("NOTE: sections 1-4 compare against the pitcher's OVERALL mix,")
+        out("which ignores the count. This section's 'scout' bar is")
+        out("count-split. The difference between the two is how much of the")
+        out("headline edge is just 'the model knows about counts' — which a")
+        out("hitter already does.")
     else:
         out(f"No cell had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
 
