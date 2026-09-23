@@ -414,3 +414,33 @@ outcome, and every outcome block is exactly one-hot.
 If those move, the model earns a live deployment. If they do not, the
 sequence branch has nothing to give: ship the pitcher x count table and
 stop modeling.
+
+## Run 8: previous-pitch outcomes in the sequence — RESULT
+
+Sequence width 17 -> 22 (added the 5-way outcome one-hot per timestep).
+Everything else identical to run 7.
+
+| metric | run 7 | run 8 | delta |
+|---|---|---|---|
+| top-1 | 47.4% | **48.2%** | +0.8 |
+| top-3 | 91.9% | **92.0%** | +0.1 |
+| log-loss | 1.1650 | **1.1566** | -0.0084 |
+| macro-F1 | 0.457 | **0.465** | +0.008 |
+| best val_loss | 0.4281 @ ep19 | **0.4244 @ ep17** | better, sooner |
+
+Binary fastball-family vs rest (first run to report it): model 62.9%,
+pitcher-prior baseline 59.7%, **+3.1%**.
+
+Per-class recall moved most on **CH +4.6** and **SI +4.0** — the pitches
+most often called in response to how a hitter just reacted, which is
+exactly what the outcome feature encodes. ST -4.7 and KN -2.0 gave back
+some. Net clearly positive.
+
+Over 426,731 validation rows the top-1 gain is ~10 standard errors, so
+the feature is real, not noise. But it is small, and **top-1 was
+explicitly not the success criterion for this run** — see the run 8
+criteria above. The decision rests on section 5 of
+`analyze_actionability.py`: cell win rate crossing 50% (was 45%), the
+oracle gap closing (was -0.1%), and lift over scout exceeding +0.7%.
+
+_Section 5 for run 8: pending._
