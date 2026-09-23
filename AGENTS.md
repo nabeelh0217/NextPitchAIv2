@@ -36,6 +36,18 @@ obvious metrics misleading:
 advised, >=70% accuracy there, AND >=+2 points over the pitcher's base
 rate. Run it before any further modeling work.
 
+**The gate PASSED (2026-09-23).** At a 65% commit threshold the model
+advises on 31.0% of pitches, is right 75.6% of the time there, and beats
+the pitcher's base rate by +5.2 points. The model is good enough; the
+remaining work is product, not modeling.
+
+Two rules that follow, and must not be softened:
+- **A card names the likeliest pitch WITHIN the family it tells the hitter
+  to sit on.** "Sit soft, likeliest fastball" is incoherent advice.
+- **The bar is the count-split scouting report**, not the pitcher's
+  overall mix. Any advance scout already knows he throws fastballs 3-1;
+  beating that is the only edge worth claiming.
+
 ## File map
 
 | Path | Role |
@@ -45,6 +57,7 @@ rate. Run it before any further modeling work.
 | `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` + `eval_report_v5.txt` |
 | `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining). `03_train.py` imports its `build_report` so the two can't drift |
 | `analyze_actionability.py` | **The product gate.** Confidence stratification, calibration, and the commit-slice edge over the pitcher's base rate. No retraining. Run this before any modeling change |
+| `build_commit_cards.py` | **The product.** Mines per-pitcher, per-count "sit hard / sit soft" rules from held-out predictions. Every rule must beat the COUNT-SPLIT scouting report, not just the pitcher's overall mix |
 | `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |

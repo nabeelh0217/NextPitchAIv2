@@ -179,3 +179,32 @@ sequencing signal. Adding a per-timestep outcome one-hot (ball / called
 strike / swinging strike / foul / in-play) is the highest-prior feature
 change available, and the next thing to try if the gate says the current
 model has no edge.
+
+## Gate result (2026-09-23): ACTIONABLE
+
+`analyze_actionability.py` on the run-7 model:
+
+> At a **65% commit threshold** the model advises on **31.0% of pitches**,
+> is right **75.6%** of the time there, **+5.2 points** better than the
+> pitcher's own base rate.
+
+That clears all three bars. The model is good enough to build on; the
+remaining work is product, not modeling. `build_commit_cards.py` turns
+this into the deliverable — per-pitcher, per-count "sit hard / sit soft"
+rules, mined from held-out predictions only.
+
+Two correctness rules found while building it, both caught by running
+against the synthetic negative control:
+
+1. **A card must name the likeliest pitch within the family it recommends.**
+   The first version reported the global argmax, producing "SIT SOFT /
+   likeliest FF" — self-contradictory advice a hitter cannot act on.
+2. **The baseline must be the count-split scouting report**, not the
+   pitcher's overall mix. Every advance scout knows he goes fastball 3-1.
+   Against the overall rate the cards showed large fake edges; against the
+   count-split rate the synthetic model's edges correctly collapse to +0%.
+
+A rule additionally requires `MIN_CONSISTENCY` (70% of the confident calls
+in that cell agreeing). Without it a single "sit" label can be pasted over
+a situation where the model is confidently split, which is worse than
+silence.
