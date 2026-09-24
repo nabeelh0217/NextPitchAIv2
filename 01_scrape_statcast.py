@@ -14,6 +14,9 @@ Usage:
 
 Output:
     statcast_raw_v5.parquet  (~2-4 GB for multiple seasons)
+
+v7 adds zone / sz_top / sz_bot for the location head. Everything else
+the model uses was already being scraped.
 """
 
 import os
@@ -64,10 +67,17 @@ KEEP_COLUMNS = [
     "stand",                                    # batter hand: R/L
     "p_throws",                                 # pitcher hand: R/L
 
-    # Pitch physics (for sequence features + future location prediction)
+    # Pitch physics (for sequence features + location prediction)
     "release_speed", "release_spin_rate",
     "plate_x", "plate_z",
     "pfx_x", "pfx_z",                          # horizontal/vertical movement
+
+    # v7: location target. sz_top/sz_bot are the BATTER-SPECIFIC strike
+    # zone for that pitch — "up" means something different to a 5'6"
+    # hitter than a 6'7" one, so a league-average zone would mislabel a
+    # lot of borderline pitches. `zone` is Statcast's own 1-14 label,
+    # kept as a cross-check on our derived attack zones.
+    "zone", "sz_top", "sz_bot",
 
     # v5: environment & personnel
     "home_team",                                # ballpark proxy (park factors)
