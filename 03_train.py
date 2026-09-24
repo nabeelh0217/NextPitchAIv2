@@ -108,7 +108,7 @@ ALPHA_CAP = 2.0
 #                on that season. No shared games, and it is the actual
 #                deployment question: predict a year you have not seen.
 #                Numbers read LOWER; they are the honest ones.
-SPLIT_MODE = "random"
+SPLIT_MODE = "temporal"
 HOLDOUT_SEASON = 2025
 
 # Second head: where the pitch goes (heart/shadow/chase/waste).
