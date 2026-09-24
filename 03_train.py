@@ -100,6 +100,23 @@ FOCAL_GAMMA = 2.0
 ALPHA_POWER = 0.25
 ALPHA_CAP = 2.0
 
+# Split mode.
+#   "random"   - stratified 80/20 over all pitches. Comparable to runs
+#                1-8, but validation rows share at-bats and outings with
+#                training rows, so the edge is optimistic.
+#   "temporal" - train on every season before HOLDOUT_SEASON, validate
+#                on that season. No shared games, and it is the actual
+#                deployment question: predict a year you have not seen.
+#                Numbers read LOWER; they are the honest ones.
+SPLIT_MODE = "random"
+HOLDOUT_SEASON = 2025
+
+# Second head: where the pitch goes (heart/shadow/chase/waste).
+# Location is far noisier than type - a pitcher aims and misses - so it
+# is weighted well below the type head and must never drag it down.
+ENABLE_LOCATION_HEAD = True
+LOCATION_LOSS_WEIGHT = 0.3
+
 # =========================
 # 0) Load metadata + arrays
 # =========================
@@ -117,6 +134,13 @@ X_park_id = np.load(DATA_DIR / "X_park_id.npy")
 X_catcher_id = np.load(DATA_DIR / "X_catcher_id.npy")
 X_arsenal_mask = np.load(DATA_DIR / "X_arsenal_mask.npy")
 y_labels = np.load(DATA_DIR / "y_labels.npy")
+y_zone = (np.load(DATA_DIR / "y_zone.npy")
+          if (DATA_DIR / "y_zone.npy").exists() else None)
+seasons = (np.load(DATA_DIR / "X_season.npy")
+           if (DATA_DIR / "X_season.npy").exists() else None)
+HAS_LOCATION = ENABLE_LOCATION_HEAD and y_zone is not None
+n_zone = int(meta.get("n_zones", 4))
+zone_classes = meta.get("zone_classes", [])
 
 print(f"Samples: {len(y_labels):,}")
 print(f"Seq shape: {X_seq.shape}")
@@ -135,10 +159,22 @@ pitch_classes = meta["pitch_classes"]
 # =========================
 # 1) Train/val split (natural distribution; no resampling anywhere)
 # =========================
-print("\nSplitting train/val (80/20, stratified)...")
 indices = np.arange(len(y_labels))
-idx_tr, idx_val = train_test_split(
-    indices, test_size=0.2, random_state=42, stratify=y_labels)
+if SPLIT_MODE == "temporal":
+    if seasons is None:
+        raise SystemExit("temporal split needs X_season.npy — re-run 02_preprocess.py")
+    idx_tr = indices[seasons < HOLDOUT_SEASON]
+    idx_val = indices[seasons == HOLDOUT_SEASON]
+    if len(idx_val) == 0:
+        raise SystemExit(f"no rows for season {HOLDOUT_SEASON}; check the scrape")
+    print(f"\nTEMPORAL split: train on {sorted(set(seasons[idx_tr].tolist()))}, "
+          f"validate on {HOLDOUT_SEASON}")
+    print("These numbers are the honest ones and will read lower than the")
+    print("random-split runs — no shared games between train and val.")
+else:
+    print("\nSplitting train/val (80/20, stratified)...")
+    idx_tr, idx_val = train_test_split(
+        indices, test_size=0.2, random_state=42, stratify=y_labels)
 print(f"Train: {len(idx_tr):,}  Val: {len(idx_val):,}")
 
 
@@ -156,6 +192,23 @@ train_inputs = gather(idx_tr)
 val_inputs = gather(idx_val)
 y_tr = y_labels[idx_tr]
 y_val = y_labels[idx_val]
+
+if HAS_LOCATION:
+    # Rows with no usable location get label 0 and sample_weight 0, so
+    # they contribute nothing to the zone loss instead of being guessed.
+    z_tr_raw, z_val_raw = y_zone[idx_tr], y_zone[idx_val]
+    z_tr = np.where(z_tr_raw >= 0, z_tr_raw, 0).astype(np.int64)
+    z_val = np.where(z_val_raw >= 0, z_val_raw, 0).astype(np.int64)
+    w_tr = (z_tr_raw >= 0).astype(np.float32)
+    w_val = (z_val_raw >= 0).astype(np.float32)
+    print(f"Location head ON (weight {LOCATION_LOSS_WEIGHT}): "
+          f"{w_tr.mean():.1%} of training rows have a usable zone")
+    y_tr_out = {"output": y_tr, "zone_output": z_tr}
+    y_val_out = {"output": y_val, "zone_output": z_val}
+    sw_tr = {"output": np.ones(len(y_tr), np.float32), "zone_output": w_tr}
+    sw_val = {"output": np.ones(len(y_val), np.float32), "zone_output": w_val}
+else:
+    y_tr_out, y_val_out, sw_tr, sw_val = y_tr, y_val, None, None
 
 
 # =========================
@@ -246,6 +299,19 @@ logits = Dense(n_pitch, name="logits")(z)
 masked_logits = logits + (1.0 - mask_input) * -1e9
 output = Activation("softmax", name="output")(masked_logits)
 
+# Second head: where the pitch ends up. Shares the trunk, so the
+# type/location correlation (sliders go low-away, four-seamers go up) is
+# available to it implicitly without forcing a sparse 40-class joint
+# target. No arsenal mask here — every pitcher can miss anywhere.
+outputs = output
+if HAS_LOCATION:
+    zh = Dense(64, activation="relu", name="zone_hidden")(z)
+    zh = Dropout(0.2)(zh)
+    zone_output = Dense(n_zone, activation="softmax", name="zone_output")(zh)
+    # Dict, not list: targets, losses and sample_weights are all keyed by
+    # name, and a list here makes Keras index a dict by position.
+    outputs = {"output": output, "zone_output": zone_output}
+
 model = Model(
     inputs=[
         seq_input, ctx_input,
@@ -254,21 +320,35 @@ model = Model(
         park_id_input, catcher_id_input,
         mask_input,
     ],
-    outputs=output
+    outputs=outputs
 )
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
-model.compile(optimizer=optimizer, loss=focal_loss(), metrics=["accuracy"])
+if HAS_LOCATION:
+    model.compile(
+        optimizer=optimizer,
+        loss={"output": focal_loss(),
+              "zone_output": "sparse_categorical_crossentropy"},
+        loss_weights={"output": 1.0, "zone_output": LOCATION_LOSS_WEIGHT},
+        weighted_metrics={"output": ["accuracy"], "zone_output": ["accuracy"]},
+    )
+else:
+    model.compile(optimizer=optimizer, loss=focal_loss(), metrics=["accuracy"])
 model.summary()
 
 
 # =========================
 # 4) Callbacks
 # =========================
+# With two heads val_loss is the weighted total; the type head is what
+# we select on.
+MONITOR = "val_output_loss" if HAS_LOCATION else "val_loss"
+
 callbacks = [
     ModelCheckpoint(
         str(DATA_DIR / "best_model_v5.keras"),
-        monitor="val_loss",
+        monitor=MONITOR,
+        mode="min",
         save_best_only=True,
         verbose=1
     ),
@@ -277,13 +357,15 @@ callbacks = [
         save_best_only=False
     ),
     EarlyStopping(
-        monitor="val_loss",
+        monitor=MONITOR,
+        mode="min",
         patience=PATIENCE,
         restore_best_weights=True,
         verbose=1
     ),
     ReduceLROnPlateau(
-        monitor="val_loss",
+        monitor=MONITOR,
+        mode="min",
         factor=0.5,
         patience=3,
         min_lr=1e-6,
@@ -301,8 +383,10 @@ print(f"Batch size: {BATCH_SIZE}")
 print(f"Early stopping patience: {PATIENCE}")
 
 history = model.fit(
-    train_inputs, y_tr,
-    validation_data=(val_inputs, y_val),
+    train_inputs, y_tr_out,
+    sample_weight=sw_tr,
+    validation_data=((val_inputs, y_val_out, sw_val) if HAS_LOCATION
+                     else (val_inputs, y_val)),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
     callbacks=callbacks,
@@ -318,12 +402,62 @@ history = model.fit(
 # the saved model at any time.
 hist_dict = {k: [float(v) for v in vals] for k, vals in history.history.items()}
 
-y_pred_probs = model.predict(val_inputs, batch_size=2048, verbose=0)
+pred = model.predict(val_inputs, batch_size=2048, verbose=0)
+y_pred_probs, zone_probs = ((pred["output"], pred["zone_output"])
+                            if HAS_LOCATION else (pred, None))
+
+# --- Location head, held to the same bar as the type head ---
+if HAS_LOCATION:
+    zl = []
+    m = w_val > 0
+    zp = zone_probs[m].argmax(1)
+    zt = z_val[m]
+    zl.append("=" * 50)
+    zl.append("LOCATION HEAD (attack zone)")
+    zl.append("=" * 50)
+    zl.append(f"\nScored on the {m.sum():,} validation pitches with a usable")
+    zl.append("zone. Location is far noisier than type — a pitcher aims and")
+    zl.append("misses — so judge this against the baselines, not in absolute")
+    zl.append("terms.\n")
+
+    # Baseline 1: always predict the commonest zone overall.
+    league_lean = int(np.bincount(z_tr[w_tr > 0], minlength=n_zone).argmax())
+    b_league = float((zt == league_lean).mean())
+    # Baseline 2: this pitcher's own most common zone, from TRAINING rows.
+    npid = int(X_pitcher_id.max()) + 1
+    cnt = np.zeros((npid, n_zone))
+    np.add.at(cnt, (X_pitcher_id[idx_tr][w_tr > 0], z_tr[w_tr > 0]), 1.0)
+    pit_lean = np.where(cnt.sum(1) > 0, cnt.argmax(1), league_lean).astype(int)
+    b_pitcher = float((zt == pit_lean[X_pitcher_id[idx_val][m]]).mean())
+    acc = float((zp == zt).mean())
+
+    zl.append(f"{'':<26}{'accuracy':>10}{'vs model':>10}")
+    zl.append(f"{'model':<26}{acc:>10.1%}{'':>10}")
+    zl.append(f"{'league commonest zone':<26}{b_league:>10.1%}{acc-b_league:>+10.1%}")
+    zl.append(f"{'pitcher commonest zone':<26}{b_pitcher:>10.1%}{acc-b_pitcher:>+10.1%}")
+    zl.append("")
+    zl.append("Per-zone recall:")
+    for i, zc in enumerate(zone_classes or range(n_zone)):
+        sel = zt == i
+        if sel.sum():
+            zl.append(f"  {str(zc):<8}{(zp[sel]==i).mean():>7.1%} "
+                      f"({sel.sum():,} pitches, {sel.mean():.1%} of all)")
+    zl.append("")
+    zl.append("Confusion (rows actual, cols predicted):")
+    cmz = np.zeros((n_zone, n_zone), int)
+    np.add.at(cmz, (zt, zp), 1)
+    zl.append(pd.DataFrame(cmz, index=list(zone_classes), columns=list(zone_classes)).to_string())
+    LOCATION_BLOCK = "\n".join(zl)
+else:
+    LOCATION_BLOCK = ""
+
 report = build_report(
     y_val, y_pred_probs,
     X_pitcher_id[idx_tr], y_tr,
     X_pitcher_id[idx_val], pitch_classes, hist_dict,
 )
+if LOCATION_BLOCK:
+    report = report + "\n\n" + LOCATION_BLOCK
 print("\n" + report)
 write_report(report)
 
@@ -333,15 +467,19 @@ write_report(report)
 # =========================
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
-ax1.plot(history.history["accuracy"], label="train acc")
-ax1.plot(history.history["val_accuracy"], label="val acc")
+_ak = "output_accuracy" if "output_accuracy" in history.history else "accuracy"
+ax1.plot(history.history[_ak], label="train acc")
+ax1.plot(history.history["val_" + _ak], label="val acc")
 ax1.set_xlabel("Epoch")
 ax1.set_ylabel("Accuracy")
 ax1.set_title("Accuracy")
 ax1.legend()
 
-ax2.plot(history.history["loss"], label="train loss")
-ax2.plot(history.history["val_loss"], label="val loss")
+_lk = "output_loss" if "output_loss" in history.history else "loss"
+ax2.plot(history.history[_lk], label="train loss (type head)")
+ax2.plot(history.history["val_" + _lk], label="val loss (type head)")
+if "val_zone_output_loss" in history.history:
+    ax2.plot(history.history["val_zone_output_loss"], label="val loss (zone head)")
 ax2.set_xlabel("Epoch")
 ax2.set_ylabel("Loss")
 ax2.set_title("Loss")

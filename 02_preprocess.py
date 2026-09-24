@@ -25,6 +25,8 @@ Features:
   - Sequences: this pitcher's previous 8 pitches (type one-hot, OUTCOME
     one-hot, physics, same-at-bat flag)
   - Arsenal mask: (N, 10) binary — which pitch types this pitcher throws
+  - Location: attack-zone target (heart/shadow/chase/waste) plus
+    leakage-free pitcher and batter location priors
 
 Requirements:
     pip install pandas numpy scikit-learn joblib pyarrow
@@ -129,6 +131,55 @@ for _d in ("foul", "foul_tip", "foul_bunt", "bunt_foul_tip", "foul_pitchout"):
     OUTCOME_OF[_d] = 3
 for _d in ("hit_into_play", "hit_into_play_score", "hit_into_play_no_out"):
     OUTCOME_OF[_d] = 4
+
+
+# =========================
+# Location target — Statcast attack zones
+# =========================
+# heart  : middle of the plate, damage it
+# shadow : straddling the edge, protect
+# chase  : off the plate but reachable, lay off
+# waste  : nowhere near
+#
+# Computed in units of the BATTER'S OWN strike zone, which is why
+# sz_top/sz_bot are scraped: "up" is a different pitch to a 5'6" hitter
+# than a 6'7" one, and the heart/shadow boundary is exactly where that
+# difference decides the label.
+ZONE_CLASSES = ["heart", "shadow", "chase", "waste"]
+N_ZONE = len(ZONE_CLASSES)
+PLATE_HALF_FT = 0.708 + 0.121   # half plate (8.5in) + ball radius
+ZONE_EDGES = (0.67, 1.33, 2.00)  # heart | shadow | chase | waste
+
+
+def compute_attack_zone(df: pd.DataFrame) -> np.ndarray:
+    """
+    Chebyshev distance from zone centre, in zone-half-widths, bucketed.
+    r <= 0.67 heart, <= 1.33 shadow, <= 2.0 chase, else waste.
+    Rows missing location or zone bounds return -1 and are excluded from
+    the location loss rather than guessed at.
+    """
+    px = df["plate_x"].values.astype(np.float64)
+    pz = df["plate_z"].values.astype(np.float64)
+    top = df["sz_top"].values.astype(np.float64) if "sz_top" in df.columns else np.full(len(df), np.nan)
+    bot = df["sz_bot"].values.astype(np.float64) if "sz_bot" in df.columns else np.full(len(df), np.nan)
+
+    # League-average fallback so a missing zone bound costs one row's
+    # precision, not the whole row.
+    top = np.where(np.isnan(top), 3.40, top)
+    bot = np.where(np.isnan(bot), 1.60, bot)
+    half_h = np.maximum((top - bot) / 2.0, 0.1)
+    mid = (top + bot) / 2.0
+
+    zx = np.abs(px) / PLATE_HALF_FT
+    zz = np.abs(pz - mid) / half_h
+    r = np.maximum(zx, zz)
+
+    out = np.full(len(df), N_ZONE - 1, dtype=np.int64)   # default waste
+    out[r <= ZONE_EDGES[2]] = 2
+    out[r <= ZONE_EDGES[1]] = 1
+    out[r <= ZONE_EDGES[0]] = 0
+    out[np.isnan(px) | np.isnan(pz)] = -1
+    return out
 
 
 def build_id_mapping(series: pd.Series, min_count: int) -> dict:
@@ -428,6 +479,32 @@ def main():
     seen_prior, _ = expanding_prior_dist(
         df, ["batter"], pitch_onehot, SEEN_SMOOTHING, league_dist)
 
+    # ---------------------------
+    # Location target + leakage-free location priors
+    # ---------------------------
+    print("\nComputing attack zones...")
+    y_zone = compute_attack_zone(df)
+    valid = y_zone >= 0
+    print(f"  usable location rows: {valid.sum():,} "
+          f"({valid.mean():.1%}); unusable are excluded from the zone loss")
+    for i, z in enumerate(ZONE_CLASSES):
+        n = int((y_zone == i).sum())
+        print(f"  {z}: {n:,} ({n/max(valid.sum(),1)*100:.1f}%)")
+
+    # Same expanding pattern as the arsenal prior: where has this pitcher
+    # put the ball BEFORE this pitch. Rows with no usable zone contribute
+    # nothing to the running counts.
+    zone_onehot = np.zeros((len(df), N_ZONE), dtype=np.float32)
+    zone_onehot[valid, y_zone[valid]] = 1.0
+    league_zone = (zone_onehot.sum(0) / max(zone_onehot.sum(), 1.0)).astype(np.float32)
+    print("Computing pitcher location priors (expanding, leak-free)...")
+    zone_prior, _ = expanding_prior_dist(
+        df, ["pitcher"], zone_onehot, ARSENAL_SMOOTHING, league_zone)
+
+    print("Computing batter location-seen profiles...")
+    zone_seen, _ = expanding_prior_dist(
+        df, ["batter"], zone_onehot, SEEN_SMOOTHING, league_zone)
+
     print("Computing batter whiff rates per pitch type...")
     desc = df["description"].fillna("")
     swing_flag = desc.isin(SWING_DESCRIPTIONS).values.astype(np.float32)
@@ -453,9 +530,11 @@ def main():
     )
     X_ctx = np.concatenate([
         ctx_state, arsenal_prior, matchup_dist, matchup_familiarity,
-        seen_prior, batter_whiff,
+        seen_prior, batter_whiff, zone_prior, zone_seen,
     ], axis=1)
-    ctx_feature_names = ctx_state_names + prior_names
+    ctx_feature_names = (ctx_state_names + prior_names
+                         + [f"zoneprior_{z}" for z in ZONE_CLASSES]
+                         + [f"zoneseen_{z}" for z in ZONE_CLASSES])
     print(f"Context shape: {X_ctx.shape} ({len(ctx_feature_names)} features)")
 
     ctx_scaler = StandardScaler()
@@ -515,6 +594,11 @@ def main():
     np.save(OUT_DIR / "X_catcher_id.npy", X_catcher_id)
     np.save(OUT_DIR / "X_arsenal_mask.npy", X_arsenal_mask)
     np.save(OUT_DIR / "y_labels.npy", y_labels)
+    np.save(OUT_DIR / "y_zone.npy", y_zone)
+    # Season enables a temporal split (train on past years, validate on
+    # the most recent) without re-reading the parquet.
+    np.save(OUT_DIR / "X_season.npy",
+            df["game_date"].dt.year.values.astype(np.int32))
 
     joblib.dump(ctx_scaler, OUT_DIR / "context_scaler_v5.pkl")
     joblib.dump(seq_scaler, OUT_DIR / "seq_scaler_v5.pkl")
@@ -550,6 +634,9 @@ def main():
         "n_pitch_types": N_PITCH,
         "pitch_classes": PITCH_CLASSES,
         "outcome_classes": OUTCOME_CLASSES,
+        "zone_classes": ZONE_CLASSES,
+        "n_zones": N_ZONE,
+        "seasons": sorted(int(s) for s in df["game_date"].dt.year.unique()),
         "n_pitcher_ids": len(pitcher_map) + 1,
         "n_batter_ids": len(batter_map) + 1,
         "n_park_ids": len(park_map) + 1,

@@ -160,11 +160,16 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
     out("EVALUATION (natural distribution)")
     out("=" * 50)
     if history:
-        n_epochs = len(history["val_loss"])
-        best = int(np.argmin(history["val_loss"]))
-        out(f"\nTraining: {n_epochs} epochs run, best val_loss "
-            f"{history['val_loss'][best]:.4f} at epoch {best + 1}, "
-            f"val_acc there {history['val_accuracy'][best]:.1%}")
+        # With a second head Keras renames these: val_output_loss is the
+        # type head, val_loss becomes the weighted total.
+        lk = "val_output_loss" if "val_output_loss" in history else "val_loss"
+        ak = ("val_output_accuracy" if "val_output_accuracy" in history
+              else "val_accuracy")
+        n_epochs = len(history[lk])
+        best = int(np.argmin(history[lk]))
+        acc = f", val_acc there {history[ak][best]:.1%}" if ak in history else ""
+        out(f"\nTraining: {n_epochs} epochs run, best {lk} "
+            f"{history[lk][best]:.4f} at epoch {best + 1}{acc}")
 
     out("\nModel vs pitcher-prior baseline")
     out("(baseline = this pitcher's training pitch mix, no game context.")

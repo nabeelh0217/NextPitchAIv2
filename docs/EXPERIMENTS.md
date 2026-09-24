@@ -482,3 +482,60 @@ count-split table would have said on those same pitches:
 (The advised pitches are model-selected, so this is not a fair
 model-vs-table comparison — but it is the product's real claim, since
 staying silent the rest of the time is part of the design.)
+
+## v7: location head + 2025 season + temporal split
+
+Three changes, deliberately run as two training runs so the data effect
+and the split effect stay separable.
+
+**Location target — Statcast attack zones** (`heart / shadow / chase /
+waste`), computed in units of the BATTER'S OWN strike zone from
+`plate_x`, `plate_z`, `sz_top`, `sz_bot`. Chebyshev distance from zone
+centre in zone-half-widths, bucketed at 0.67 / 1.33 / 2.00. That framing
+maps onto a hitter's decision (damage it / protect / lay off / take)
+rather than onto geometry, which a 13-cell grid does not.
+
+Rows with unusable location get label 0 and **sample_weight 0**, so they
+contribute nothing to the zone loss rather than being guessed at.
+
+**Architecture**: second softmax head off the shared trunk, loss weight
+**0.3**. Sharing the trunk gives it the type/location correlation
+(sliders go low-away, four-seamers go up) implicitly, without forcing a
+sparse 40-class joint target. No arsenal mask on this head — any pitcher
+can miss anywhere. Checkpointing and early stopping monitor
+`val_output_loss` (the type head), not the weighted total, so the
+location head can never quietly drive model selection.
+
+**Location priors** added to the context vector with the same expanding
+leakage-free pattern as the arsenal prior: where this pitcher has put the
+ball, and where this batter has been pitched, both excluding the current
+row. Context 55 -> 63 features.
+
+**Temporal split**: `SPLIT_MODE = "temporal"` trains on every season
+before `HOLDOUT_SEASON` and validates on that season. No shared games or
+at-bats, and it is the real deployment question. This addresses the
+CRITICAL open defect.
+
+### Run plan
+
+| run | split | purpose |
+|---|---|---|
+| 9a | random | comparable to run 8; isolates the effect of adding 2025 + the location head |
+| 9b | temporal (hold out 2025) | the honest number, and the one to quote publicly |
+
+### Location success criteria, fixed in advance
+
+Location is far noisier than type — a pitcher aims and misses, and that
+execution variance is irreducible. Judge the zone head ONLY against its
+baselines:
+
+- beats "league commonest zone" by a clear margin, AND
+- beats "this pitcher's commonest zone" by >= +2 points.
+
+If it fails both, drop the head (`ENABLE_LOCATION_HEAD = False`) rather
+than shipping a location read that is worse than a constant guess.
+
+Verified on synthetic data, where locations are generated from
+independent noise: the head correctly scores 41.1% against a 43.4%
+baseline and collapses onto the two commonest zones. A no-signal target
+produces a negative result, so the measurement is not self-flattering.
