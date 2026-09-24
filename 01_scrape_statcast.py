@@ -35,13 +35,19 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_PATH = BASE_DIR / "statcast_raw_v5.parquet"
 
 # Seasons to pull — more data = better embeddings for pitcher/batter IDs.
-# Each full season is ~700k-750k pitches. 3 seasons gives ~2.2M rows.
-# Start with 2022-2024; add 2021 later if you want more.
+# Each full season is ~700k-750k pitches. 4 seasons gives ~2.9M rows.
 SEASONS = [
     ("2022-04-07", "2022-10-05"),
     ("2023-03-30", "2023-10-01"),
     ("2024-03-28", "2024-09-29"),
+    ("2025-03-18", "2025-09-28"),   # opens with the Tokyo Series
 ]
+
+# Adding seasons FORWARD is safe; adding them backward is not. The
+# sweeper (ST) barely existed as a Statcast label before 2023, so 2021
+# and earlier would inject a labelling shift that looks like a real
+# change in pitcher behaviour. 2025 is the closest season to deployment
+# and the most representative data available.
 
 # Columns we need for v5
 # (pybaseball returns ~90 columns; we keep only what matters)
