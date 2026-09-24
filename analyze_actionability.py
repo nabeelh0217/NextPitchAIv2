@@ -349,6 +349,42 @@ def main():
     else:
         out(f"No cell had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
 
+    hdr(out, "6. THE PRODUCT CLAIM — what goes on the site")
+    out("Sections 3-5 are model diagnostics. This is the sentence a hitter")
+    out("is actually promised: when the tool SPEAKS, how often is it right,")
+    out("and how often would his count-split scouting table have been right")
+    out("on those same pitches?")
+    out("")
+    out("The advised pitches are chosen by the model, so this is not a fair")
+    out("model-vs-table comparison — but it IS the product's real claim,")
+    out("because staying silent the rest of the time is part of the design.")
+    out("")
+    # Per-row scout lean, from the same training count-split table.
+    scout_lean_row = np.zeros(len(yv), dtype=int)
+    for b in range(nb):
+        for s in range(ns_):
+            sel = (balls_i == b) & (strikes_i == s)
+            if not sel.any():
+                continue
+            tt = ct[pid[sel], b, s]
+            rt = np.where(tt >= 40, ch[pid[sel], b, s] / np.maximum(tt, 1),
+                          hard_true[sel].mean())
+            scout_lean_row[sel] = (rt >= 0.5).astype(int)
+    out(f"{'commit @':>10}{'speaks on':>12}{'tool':>8}{'table':>8}"
+        f"{'edge':>8}")
+    for t in COMMIT_THRESHOLDS:
+        sel = cal_conf >= t
+        if sel.sum() == 0:
+            continue
+        tool = float((hard_pred[sel] == hard_true[sel]).mean())
+        tab = float((scout_lean_row[sel] == hard_true[sel]).mean())
+        out(f"{t:>10.0%}{sel.mean():>12.1%}{tool:>8.1%}{tab:>8.1%}"
+            f"{tool - tab:>+8.1%}")
+    out("")
+    out("Read the chosen row as: \"on X% of pitches the tool gives you a")
+    out("read; it is right A% of the time, where your scouting table would")
+    out("have been right B%.\"")
+
     hdr(out, "VERDICT")
     if best:
         t, share, acc, edge = best

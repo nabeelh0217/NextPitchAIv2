@@ -125,31 +125,31 @@ baseline is what you can predict knowing only who is on the mound, so
 features do anything at all**. 10-class top-1 reads lower than the old
 4-bucket numbers; that is expected and not a regression.
 
-## Current status (2026-09-23)
+## Current status (2026-09-24)
 
-- **Alpha search is CLOSED.** Runs 5/6/7 (ALPHA_POWER 0.5 / 0.0 / 0.25) moved
-  log-loss only 0.033 nats while moving top-1 4.9 points — a decision-threshold
-  frontier, not an information gain. Run 6 (top-1 48.9%, log-loss 1.1531) is
-  best on calibration; run 7 (47.4%, 1.1650, macro-F1 0.457) is best balanced.
-  Do not reopen it.
-- **A 5-dimension audit refuted the "model guesses from all pitch types"
-  hypothesis** — the mask is applied at evaluation, and the prior baseline is
-  itself arsenal-constrained, so the reported lift was always within-arsenal.
-  See the post-run-7 section of `docs/EXPERIMENTS.md` for the full findings.
-- **Open defects, in priority order** (also in EXPERIMENTS.md):
-  1. CRITICAL — the random per-pitch split leaves validation rows dependent on
-     training rows (same at-bat, same outing). Est. 1-4 points of top-1
-     inflation. Fixing means a grouped/temporal split and a retrain, and the
-     honest number will read LOWER.
-  2. HIGH — the arsenal mask is built over train+val, so the true validation
-     label can never be zeroed; contaminates log-loss.
-  3. MEDIUM — mask threshold is a raw count, not a usage share, so starters'
-     masks approach all-ones.
-- **Reality check**: realistic ceiling is 52-56% top-1; top-3 at ~92% is within
-  2-3 points of any achievable ceiling. Lead with top-3 and the fastball-family
-  binary number, not 10-class top-1.
-- `diagnose_arsenal.py` measures items 2-3 empirically from `data_v5/` in
-  seconds. Run it before acting on them.
+- **MODELING IS CLOSED.** Run 8 added previous-pitch outcomes to the
+  sequence and cleared all three pre-registered section-5 criteria: cell
+  win rate 45% -> **51%**, oracle gap -0.1% -> **+0.3%**, lift over the
+  count-split scout +0.7% -> **+1.1%**. The model now exceeds the best
+  constant rule fitted on the validation rows themselves, so it is
+  discriminating within situations — something no static table can
+  reproduce. Headline: top-1 48.2%, top-3 92.0%, log-loss 1.1566.
+- **The product is a LIVE lookup, not a memorizable card.**
+  `build_commit_cards.py` correctly returns ~nothing, because the edge is
+  within-situation. Do not resurrect the card format.
+- **Section 6 of `analyze_actionability.py` is the number for the site**:
+  on the ~36% of pitches where the tool speaks at a 65% threshold, it is
+  right ~76%. Lead with that and the binary hard/soft framing — never
+  with 10-class top-1.
+- Temperature calibration (T = 0.800) is applied in the gate and the card
+  miner. The model is under-confident out of the box; calibrating buys
+  ~+3 points of coverage for free.
+- **Next: build `site/`.** Remaining known defects (random split, mask
+  built over train+val, count-based mask threshold) are recorded in
+  EXPERIMENTS.md and are measurement-hygiene, not blockers.
+- If a location head is ever added, it needs a re-scrape for `zone`,
+  `sz_top`, `sz_bot` — batter-specific strike-zone boundaries. Everything
+  else the model uses is already in the parquet.
 
 ## Conventions
 

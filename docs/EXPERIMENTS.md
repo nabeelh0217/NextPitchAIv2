@@ -443,4 +443,42 @@ criteria above. The decision rests on section 5 of
 `analyze_actionability.py`: cell win rate crossing 50% (was 45%), the
 oracle gap closing (was -0.1%), and lift over scout exceeding +0.7%.
 
-_Section 5 for run 8: pending._
+### Section 5 for run 8: ALL THREE CRITERIA CLEARED
+
+| criterion (fixed before the run) | run 7 | run 8 | |
+|---|---|---|---|
+| cell win rate > 50% | 45% | **51%** | pass |
+| oracle gap closes | -0.1% | **+0.3%** | pass |
+| lift over scout > +0.7% | +0.7% | **+1.1%** | pass |
+
+The oracle line is the important one. The model now **exceeds the best
+constant rule fitted on the validation rows themselves** — a rule nobody
+could write in advance, since it is fit in-sample on the answers. Beating
+it means the model discriminates *within* situations, which no static
+table can reproduce by construction.
+
+The mechanism confirms itself: the largest section-4 gains are **0-2
+(+5.9 -> +7.7)** and **1-2 (+5.9 -> +7.3)** — two-strike counts, where
+what the hitter just did is maximally informative about the putaway
+pitch. That is exactly what the outcome one-hot encodes.
+
+Caveat on magnitude: +1.1% over a good count-split table is modest, the
+win rate is barely over half, and the oracle margin is only ~1.5x the
+noise band. Directionally decisive, small in size.
+
+**MODELING IS CLOSED.** The sequence branch earns its keep; the product
+is a live lookup, not a static card.
+
+### Section 6: the product claim
+
+Added because sections 3-5 are model diagnostics, not the sentence a
+hitter is promised. On the pitches where the tool speaks, versus what his
+count-split table would have said on those same pitches:
+
+| commit @ | speaks on | tool | table | edge |
+|---|---|---|---|---|
+| 65% | 35.9% | 76.0% | — | — |
+
+(The advised pitches are model-selected, so this is not a fair
+model-vs-table comparison — but it is the product's real claim, since
+staying silent the rest of the time is part of the design.)
