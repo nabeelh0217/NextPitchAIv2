@@ -76,6 +76,16 @@ carries `"version": 6`.
 run_pipeline.bat                     # Windows equivalent (--fresh only)
 ```
 
+`03_train.py` takes flags that override the config constants, and prints
+a RUN CONFIG banner showing what is actually in effect. **Prefer flags to
+editing the file** — two runs in a row were invalidated by an edit that
+never reached the executed copy:
+
+```bash
+python 03_train.py --split random --no-location-head   # run 10
+python 03_train.py --split temporal --holdout-season 2025
+```
+
 Needs Python 3.10–3.13 (TensorFlow has no wheels for newer). The runners
 find one automatically and manage `.venv`. The scrape hits Baseball
 Savant directly — it cannot run from sandboxed/proxied environments.
@@ -159,8 +169,8 @@ features do anything at all**. 10-class top-1 reads lower than the old
   uncertainty vs the type head's 13%, and heart-vs-rest is actionable on
   just 5.8% of pitches, under the >=10% product bar. Do not delete, do
   not ship. See EXPERIMENTS.md.
-- **Run 10 decides the head**: 4 seasons, random split,
-  `ENABLE_LOCATION_HEAD = False`, isolating whether the head is what cost
+- **Run 10 decides the head**: `python 03_train.py --split random
+  --no-location-head` (flags, not file edits), isolating whether the head is what cost
   the type head 0.9 points (9a/9b changed two things at once). If top-1
   returns to ~48.2% the head stole capacity — remove it, or rebuild it
   decoupled off `combined` instead of the shared 64-unit bottleneck `z`.

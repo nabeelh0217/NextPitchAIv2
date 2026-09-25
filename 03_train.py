@@ -29,6 +29,7 @@ Output:
     data_v5/training_history_v5.json
 """
 
+import argparse
 import json
 from pathlib import Path
 
@@ -116,6 +117,37 @@ HOLDOUT_SEASON = 2025
 # is weighted well below the type head and must never drag it down.
 ENABLE_LOCATION_HEAD = True
 LOCATION_LOSS_WEIGHT = 0.3
+
+# The values above are defaults; every one can be overridden on the
+# command line. Two runs in a row were invalidated by a config edit that
+# never reached the file being executed (run 9b went out as a random
+# split after SPLIT_MODE was set to "temporal"). A flag cannot silently
+# fail to apply, and the banner below prints what is actually in effect.
+_ap = argparse.ArgumentParser(description="Train the v6 pitch model.")
+_ap.add_argument("--split", choices=["random", "temporal"], default=SPLIT_MODE)
+_ap.add_argument("--holdout-season", type=int, default=HOLDOUT_SEASON)
+_ap.add_argument("--location-head", dest="loc", action="store_true", default=None,
+                 help="force the attack-zone head ON")
+_ap.add_argument("--no-location-head", dest="loc", action="store_false",
+                 help="force the attack-zone head OFF")
+_ap.add_argument("--location-weight", type=float, default=LOCATION_LOSS_WEIGHT)
+_ap.add_argument("--epochs", type=int, default=EPOCHS)
+_args = _ap.parse_args()
+
+SPLIT_MODE = _args.split
+HOLDOUT_SEASON = _args.holdout_season
+ENABLE_LOCATION_HEAD = ENABLE_LOCATION_HEAD if _args.loc is None else _args.loc
+LOCATION_LOSS_WEIGHT = _args.location_weight
+EPOCHS = _args.epochs
+
+print("=" * 60)
+print("RUN CONFIG — check this matches what you intended")
+print("=" * 60)
+print(f"  split          : {SPLIT_MODE}"
+      + (f" (hold out {HOLDOUT_SEASON})" if SPLIT_MODE == "temporal" else ""))
+print(f"  location head  : {'ON  (weight %.2f)' % LOCATION_LOSS_WEIGHT if ENABLE_LOCATION_HEAD else 'OFF'}")
+print(f"  epochs         : {EPOCHS}")
+print("=" * 60)
 
 # =========================
 # 0) Load metadata + arrays
