@@ -619,3 +619,54 @@ Run 10 isolates it: 4 seasons, random split, `ENABLE_LOCATION_HEAD =
 False`. If top-1 returns to ~48.2%, the head is a net negative and comes
 out regardless of what its own log-loss says. If it stays ~47.4%, the
 extra season explains the drop and the head is exonerated.
+
+### Location head re-scored (no retraining) — ALIVE but marginal
+
+`evaluate_model.py` against the saved 9b model, with the new metrics.
+
+|  | accuracy | vs model | log-loss | vs model |
+|---|---|---|---|---|
+| model | 40.8% | — | 1.2733 | — |
+| league zone mix | 40.8% | +0.0 | 1.2946 | **+0.0213** |
+| pitcher zone mix | 40.8% | +0.0 | 1.2924 | **+0.0191** |
+
+**Log-loss lift is positive on both baselines**, at roughly 20x the
+measured seed noise. The head learned something real. This also confirms
+the diagnostic was the problem, not the head: accuracy read +0.0 while
+log-loss found signal, which is precisely what invariant 8 now guards.
+
+Sanity check passes — marginal zone entropy is 1.2944 nats and the league
+baseline scores 1.2946, so the baseline is exactly the marginal.
+
+**Size it honestly.** The head removes **1.6%** of available location
+uncertainty (0.0213 / 1.2944). The type head removes **13%** of its own
+(0.177 / 1.351). Location carries about a ninth as much extractable
+signal as type — expected for a quantity that is mostly execution
+variance.
+
+heart vs rest, base rate 24.1%:
+
+| read | coverage | heart rate | vs base |
+|---|---|---|---|
+| P(heart) >= 0.30 — "be ready" | 1.5% | 34.9% | +10.8 |
+| P(heart) <= 0.15 — "take it" | 4.3% | 12.1% | -11.9 |
+
+Both tails move the heart rate by ~half in relative terms. But total
+actionable coverage is **5.8%**, below this project's own >=10% bar. Some
+of that is under-confidence — the type head needed T=0.800 and gained ~3
+points of coverage; the zone head is likely compressed the same way.
+Calibrating it would widen the spread without inventing information, but
+that work waits until the head's survival is settled.
+
+**Verdict: do not delete, do not ship.** The head is real but thin, and
+it may be costing the type head 0.9 points of top-1 — which is the
+product. A 5.8%-coverage location hint is not worth degrading the
+hard/soft call. Run 10 decides:
+
+- type head returns to ~48.2% -> the head stole capacity. Remove it, or
+  rebuild it decoupled: branch the zone head off `combined` rather than
+  off the shared 64-unit bottleneck `z`, so zone gradients stop reshaping
+  the representation the type head depends on. One line, and the direct
+  test of the capacity-theft hypothesis.
+- type head stays ~47.4% -> the extra season explains the drop, the head
+  is exonerated, keep it as a secondary read behind hard/soft.

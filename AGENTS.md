@@ -153,13 +153,20 @@ features do anything at all**. 10-class top-1 reads lower than the old
      pre-registered in EXPERIMENTS.md; it is a separate test, not a
      retroactive pass. Accuracy cannot judge a head whose plurality class
      wins nearly every cell.
-- **Next: run `python evaluate_model.py` against the saved 9a/9b model.**
-  It re-scores without retraining and now prints zone log-loss and the
-  heart-vs-rest table. That decides the location head's fate for free,
-  before spending another training run.
-- Then **run 10**: 4 seasons, random split, `ENABLE_LOCATION_HEAD =
-  False`, to isolate whether the head is what cost the type head 0.9
-  points (runs 9a/9b changed two things at once).
+- **Location head re-scored: ALIVE but marginal.** Zone log-loss beats
+  both baselines (+0.0213 league, +0.0191 pitcher, ~20x seed noise), so
+  it learned something real — but it removes only 1.6% of location
+  uncertainty vs the type head's 13%, and heart-vs-rest is actionable on
+  just 5.8% of pitches, under the >=10% product bar. Do not delete, do
+  not ship. See EXPERIMENTS.md.
+- **Run 10 decides the head**: 4 seasons, random split,
+  `ENABLE_LOCATION_HEAD = False`, isolating whether the head is what cost
+  the type head 0.9 points (9a/9b changed two things at once). If top-1
+  returns to ~48.2% the head stole capacity — remove it, or rebuild it
+  decoupled off `combined` instead of the shared 64-unit bottleneck `z`.
+  If top-1 stays ~47.4%, the extra season explains the drop and the head
+  is exonerated. The type head is the product; a thin location read never
+  justifies degrading the hard/soft call.
 
 ## Earlier status (2026-09-24)
 
