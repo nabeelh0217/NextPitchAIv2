@@ -111,7 +111,18 @@ Savant directly — it cannot run from sandboxed/proxied environments.
 6. **One change per training round, logged.** Runs take an hour+.
    Change one thing, retrain, append the result to
    `docs/EXPERIMENTS.md` with the verdict, then decide the next change.
-7. **Atomic artifact writes.** `01_scrape_statcast.py` writes to a `.tmp`
+7. **A run records the split it actually ran.** `03_train.py` writes
+   `data_v5/split_v5.json`; `evaluate_model.py` reads it rather than
+   keeping its own copy of `SPLIT_MODE`, and refuses to score if the row
+   count disagrees. Never duplicate split config across the two files —
+   run 9b was scored on the wrong rows for exactly that reason, and the
+   report looked completely normal.
+8. **Judge a head on a metric that can move.** Where one class is the
+   plurality in nearly every conditioning cell (the zone head: `shadow`
+   at 40.8%), argmax accuracy is pinned to the baseline no matter what
+   the head learned. Pre-register log-loss against the same baseline, and
+   the binary collapse the user can actually act on, alongside accuracy.
+9. **Atomic artifact writes.** `01_scrape_statcast.py` writes to a `.tmp`
    and `os.replace`s into place; the runners refuse a parquet < 1 MB. A
    corrupt/empty artifact silently reused cost a full re-scrape once.
 
@@ -125,7 +136,32 @@ baseline is what you can predict knowing only who is on the mound, so
 features do anything at all**. 10-class top-1 reads lower than the old
 4-bucket numbers; that is expected and not a regression.
 
-## Current status (2026-09-24)
+## Current status (2026-09-25)
+
+- **Runs 9a/9b are logged; read their EXPERIMENTS.md entry before
+  starting another run.** Three things came out of them:
+  1. **9b never ran temporally** — the `SPLIT_MODE` edit did not take, and
+     both runs scored the same random 572,669 rows. There is still no
+     temporal number; the CRITICAL split defect is OPEN. `03_train.py`
+     now writes `data_v5/split_v5.json` and both the banner and the
+     report header print the split, so this cannot recur silently.
+  2. **Seed variance is +-0.3 points top-1 / +-0.001 nats**, measured
+     from 9a vs 9b (same experiment, twice). Any lift smaller than that
+     is noise. Runs 5-8 were compared without knowing this.
+  3. **The location head failed its pre-registered accuracy criterion**
+     (+0.0 vs a constant guess). A new log-loss / heart-vs-rest test is
+     pre-registered in EXPERIMENTS.md; it is a separate test, not a
+     retroactive pass. Accuracy cannot judge a head whose plurality class
+     wins nearly every cell.
+- **Next: run `python evaluate_model.py` against the saved 9a/9b model.**
+  It re-scores without retraining and now prints zone log-loss and the
+  heart-vs-rest table. That decides the location head's fate for free,
+  before spending another training run.
+- Then **run 10**: 4 seasons, random split, `ENABLE_LOCATION_HEAD =
+  False`, to isolate whether the head is what cost the type head 0.9
+  points (runs 9a/9b changed two things at once).
+
+## Earlier status (2026-09-24)
 
 - **MODELING IS CLOSED.** Run 8 added previous-pitch outcomes to the
   sequence and cleared all three pre-registered section-5 criteria: cell
@@ -147,9 +183,8 @@ features do anything at all**. 10-class top-1 reads lower than the old
 - **Next: build `site/`.** Remaining known defects (random split, mask
   built over train+val, count-based mask threshold) are recorded in
   EXPERIMENTS.md and are measurement-hygiene, not blockers.
-- If a location head is ever added, it needs a re-scrape for `zone`,
-  `sz_top`, `sz_bot` — batter-specific strike-zone boundaries. Everything
-  else the model uses is already in the parquet.
+- The location head exists and the scrape now covers `zone`, `sz_top`,
+  `sz_bot` plus the 2025 season.
 
 ## Conventions
 

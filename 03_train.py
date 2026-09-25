@@ -49,7 +49,7 @@ from tensorflow.keras.callbacks import (
 )
 from tensorflow.keras import backend as K
 
-from evaluate_model import build_report, write_report
+from evaluate_model import build_report, build_location_report, write_report
 
 # =========================
 # Config
@@ -176,6 +176,16 @@ else:
     idx_tr, idx_val = train_test_split(
         indices, test_size=0.2, random_state=42, stratify=y_labels)
 print(f"Train: {len(idx_tr):,}  Val: {len(idx_val):,}")
+
+# Record the split that actually ran. evaluate_model.py reads this to
+# reproduce the same rows, and the eval report prints it — a SPLIT_MODE
+# edit that fails to take is otherwise invisible in the output.
+SPLIT_DESC = (f"temporal, validate on {HOLDOUT_SEASON}" if SPLIT_MODE == "temporal"
+              else "random 80%/20%, seed 42")
+with open(DATA_DIR / "split_v5.json", "w") as f:
+    json.dump({"mode": SPLIT_MODE, "holdout_season": HOLDOUT_SEASON,
+               "n_train": int(len(idx_tr)), "n_val": int(len(idx_val))}, f, indent=2)
+print(f"Split recorded: {SPLIT_DESC}")
 
 
 def gather(idx):
@@ -407,54 +417,21 @@ y_pred_probs, zone_probs = ((pred["output"], pred["zone_output"])
                             if HAS_LOCATION else (pred, None))
 
 # --- Location head, held to the same bar as the type head ---
+# Built by evaluate_model.build_location_report so training and a later
+# re-score can never disagree, same rule as build_report.
 if HAS_LOCATION:
-    zl = []
-    m = w_val > 0
-    zp = zone_probs[m].argmax(1)
-    zt = z_val[m]
-    zl.append("=" * 50)
-    zl.append("LOCATION HEAD (attack zone)")
-    zl.append("=" * 50)
-    zl.append(f"\nScored on the {m.sum():,} validation pitches with a usable")
-    zl.append("zone. Location is far noisier than type — a pitcher aims and")
-    zl.append("misses — so judge this against the baselines, not in absolute")
-    zl.append("terms.\n")
-
-    # Baseline 1: always predict the commonest zone overall.
-    league_lean = int(np.bincount(z_tr[w_tr > 0], minlength=n_zone).argmax())
-    b_league = float((zt == league_lean).mean())
-    # Baseline 2: this pitcher's own most common zone, from TRAINING rows.
-    npid = int(X_pitcher_id.max()) + 1
-    cnt = np.zeros((npid, n_zone))
-    np.add.at(cnt, (X_pitcher_id[idx_tr][w_tr > 0], z_tr[w_tr > 0]), 1.0)
-    pit_lean = np.where(cnt.sum(1) > 0, cnt.argmax(1), league_lean).astype(int)
-    b_pitcher = float((zt == pit_lean[X_pitcher_id[idx_val][m]]).mean())
-    acc = float((zp == zt).mean())
-
-    zl.append(f"{'':<26}{'accuracy':>10}{'vs model':>10}")
-    zl.append(f"{'model':<26}{acc:>10.1%}{'':>10}")
-    zl.append(f"{'league commonest zone':<26}{b_league:>10.1%}{acc-b_league:>+10.1%}")
-    zl.append(f"{'pitcher commonest zone':<26}{b_pitcher:>10.1%}{acc-b_pitcher:>+10.1%}")
-    zl.append("")
-    zl.append("Per-zone recall:")
-    for i, zc in enumerate(zone_classes or range(n_zone)):
-        sel = zt == i
-        if sel.sum():
-            zl.append(f"  {str(zc):<8}{(zp[sel]==i).mean():>7.1%} "
-                      f"({sel.sum():,} pitches, {sel.mean():.1%} of all)")
-    zl.append("")
-    zl.append("Confusion (rows actual, cols predicted):")
-    cmz = np.zeros((n_zone, n_zone), int)
-    np.add.at(cmz, (zt, zp), 1)
-    zl.append(pd.DataFrame(cmz, index=list(zone_classes), columns=list(zone_classes)).to_string())
-    LOCATION_BLOCK = "\n".join(zl)
+    LOCATION_BLOCK = build_location_report(
+        z_val, zone_probs, w_val,
+        X_pitcher_id[idx_tr], z_tr, w_tr,
+        X_pitcher_id[idx_val], zone_classes,
+    )
 else:
     LOCATION_BLOCK = ""
 
 report = build_report(
     y_val, y_pred_probs,
     X_pitcher_id[idx_tr], y_tr,
-    X_pitcher_id[idx_val], pitch_classes, hist_dict,
+    X_pitcher_id[idx_val], pitch_classes, hist_dict, SPLIT_DESC,
 )
 if LOCATION_BLOCK:
     report = report + "\n\n" + LOCATION_BLOCK

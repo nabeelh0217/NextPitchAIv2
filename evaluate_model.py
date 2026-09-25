@@ -118,7 +118,7 @@ def _binary_collapse(probs, y, classes):
 
 
 def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
-                 history=None) -> str:
+                 history=None, split_desc=None) -> str:
     """
     The evaluation block, as one string: the model vs the pitcher-prior
     baseline on top-1/top-3/log-loss, a per-type classification report,
@@ -159,6 +159,11 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
     out("=" * 50)
     out("EVALUATION (natural distribution)")
     out("=" * 50)
+    # Stamp the split into the report. Two runs that differ only by split
+    # produce reports that are otherwise near-identical in shape, and a
+    # config edit that silently fails to take is invisible without this.
+    out(f"\nSplit: {split_desc or 'UNRECORDED'}")
+    out(f"Validation rows: {len(y_val):,}")
     if history:
         # With a second head Keras renames these: val_output_loss is the
         # type head, val_loss becomes the weighted total.
@@ -220,6 +225,113 @@ def build_report(y_val, y_pred_probs, pid_tr, y_tr, pid_val, pitch_classes,
     return "\n".join(lines)
 
 
+def build_location_report(z_val, zone_probs, w_val, pid_tr, z_tr, w_tr,
+                          pid_val, zone_classes) -> str:
+    """
+    The attack-zone head, held to the same bar as the type head.
+
+    Accuracy alone cannot judge this head. `shadow` is the plurality zone
+    in almost every conditioning cell, so an argmax that never leaves it
+    is the arithmetically correct response to a mildly informative
+    distribution — the head can carry real information and still show
+    0.0% recall on the other three zones. Log-loss moves when accuracy
+    structurally cannot, so it is the test of whether anything was
+    learned; the heart-vs-rest collapse is the test of whether what was
+    learned is worth telling a hitter.
+    """
+    lines = []
+    out = lines.append
+    n_zone = zone_probs.shape[1]
+    names = list(zone_classes) if zone_classes else [str(i) for i in range(n_zone)]
+
+    m = w_val > 0
+    mt = w_tr > 0
+    zp_probs = zone_probs[m]
+    zp = zp_probs.argmax(1)
+    zt = z_val[m]
+    ztr = z_tr[mt]
+    pid_v = pid_val[m]
+
+    out("=" * 50)
+    out("LOCATION HEAD (attack zone)")
+    out("=" * 50)
+    out(f"\nScored on the {m.sum():,} validation pitches with a usable zone.")
+    out("Location is far noisier than type — a pitcher aims and misses — so")
+    out("judge this against the baselines, not in absolute terms.\n")
+
+    # --- Baselines, as full distributions so log-loss is comparable ---
+    league = np.bincount(ztr, minlength=n_zone).astype(np.float64)
+    league /= league.sum()
+    npid = int(max(pid_tr.max(), pid_val.max())) + 1
+    counts = np.zeros((npid, n_zone), dtype=np.float64)
+    np.add.at(counts, (pid_tr[mt], ztr), 1.0)
+    totals = counts.sum(axis=1, keepdims=True)
+    pit_probs = _smoothed(counts, totals, league)[pid_v]
+    lg_probs = np.repeat(league[None, :], len(zt), axis=0)
+
+    league_lean = int(league.argmax())
+    pit_lean = np.where(totals[:, 0] > 0, counts.argmax(1), league_lean).astype(int)
+
+    acc = float((zp == zt).mean())
+    b_league = float((zt == league_lean).mean())
+    b_pitcher = float((zt == pit_lean[pid_v]).mean())
+    m_ll = _log_loss(zp_probs, zt)
+    l_ll = _log_loss(lg_probs, zt)
+    p_ll = _log_loss(pit_probs, zt)
+
+    out(f"{'':<26}{'accuracy':>10}{'vs model':>10}{'log-loss':>11}{'vs model':>10}")
+    out(f"{'model':<26}{acc:>10.1%}{'':>10}{m_ll:>11.4f}{'':>10}")
+    out(f"{'league zone mix':<26}{b_league:>10.1%}{acc - b_league:>+10.1%}"
+        f"{l_ll:>11.4f}{l_ll - m_ll:>+10.4f}")
+    out(f"{'pitcher zone mix':<26}{b_pitcher:>10.1%}{acc - b_pitcher:>+10.1%}"
+        f"{p_ll:>11.4f}{p_ll - m_ll:>+10.4f}")
+    out("  (log-loss: positive = model better. Accuracy can sit exactly on")
+    out("   the baseline while log-loss moves — that means real but weak")
+    out("   signal, not a dead head.)")
+
+    # --- The hitter's actual question: is this one hittable? ---
+    # heart == over the plate. Everything else is protect or take. This is
+    # the location analogue of the hard/soft collapse on the type head.
+    hi = names.index("heart") if "heart" in names else 0
+    p_heart = zp_probs[:, hi]
+    is_heart = (zt == hi).astype(np.int64)
+    base = float(is_heart.mean())
+    out(f"\nheart vs rest — 'is this one over the plate?', the location")
+    out(f"analogue of the hard/soft call. Base rate {base:.1%}.")
+    out(f"{'threshold':<14}{'advised':>10}{'P(heart)':>11}{'actual':>10}{'vs base':>10}")
+    for thr in (0.30, 0.35, 0.40, 0.50):
+        sel = p_heart >= thr
+        if sel.sum() == 0:
+            out(f"{'>= ' + format(thr, '.2f'):<14}{0.0:>10.1%}{'-':>11}{'-':>10}{'-':>10}")
+            continue
+        hit = float(is_heart[sel].mean())
+        out(f"{'>= ' + format(thr, '.2f'):<14}{sel.mean():>10.1%}"
+            f"{p_heart[sel].mean():>11.1%}{hit:>10.1%}{hit - base:>+10.1%}")
+    # The other tail is advice too: a pitch the model says is very unlikely
+    # to be over the plate is a take.
+    for thr in (0.15, 0.10):
+        sel = p_heart <= thr
+        if sel.sum() == 0:
+            continue
+        hit = float(is_heart[sel].mean())
+        out(f"{'<= ' + format(thr, '.2f'):<14}{sel.mean():>10.1%}"
+            f"{p_heart[sel].mean():>11.1%}{hit:>10.1%}{hit - base:>+10.1%}")
+
+    out("\nPer-zone recall:")
+    for i, zc in enumerate(names):
+        sel = zt == i
+        if sel.sum():
+            out(f"  {str(zc):<8}{(zp[sel] == i).mean():>7.1%} "
+                f"({sel.sum():,} pitches, {sel.mean():.1%} of all)")
+
+    out("\nConfusion (rows actual, cols predicted):")
+    cmz = np.zeros((n_zone, n_zone), int)
+    np.add.at(cmz, (zt, zp), 1)
+    out(pd.DataFrame(cmz, index=names, columns=names).to_string())
+
+    return "\n".join(lines)
+
+
 def write_report(text: str, path: Path = REPORT_PATH) -> None:
     path.write_text(text + "\n")
     print(f"\nReport written to {path}")
@@ -246,12 +358,31 @@ def main():
     }
     y_labels = np.load(DATA_DIR / "y_labels.npy")
 
-    # Same split as 03_train.py -> identical validation rows.
+    # Reproduce 03_train.py's split. It records what it actually did in
+    # split_v5.json rather than us keeping a second copy of the config in
+    # sync — a duplicated SPLIT_MODE is exactly how a run gets scored on
+    # the wrong rows while the report looks fine.
+    split_path = DATA_DIR / "split_v5.json"
+    split = json.loads(split_path.read_text()) if split_path.exists() else {}
+    mode = split.get("mode", "random")
     indices = np.arange(len(y_labels))
-    idx_tr, idx_val = train_test_split(
-        indices, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED,
-        stratify=y_labels)
-    print(f"Validation rows: {len(idx_val):,}")
+    if mode == "temporal":
+        seasons = np.load(DATA_DIR / "X_season.npy")
+        holdout = int(split["holdout_season"])
+        idx_tr = indices[seasons < holdout]
+        idx_val = indices[seasons == holdout]
+        split_desc = f"temporal, validate on {holdout}"
+    else:
+        idx_tr, idx_val = train_test_split(
+            indices, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED,
+            stratify=y_labels)
+        split_desc = f"random {1 - SPLIT_TEST_SIZE:.0%}/{SPLIT_TEST_SIZE:.0%}, seed {SPLIT_SEED}"
+    if split and len(idx_val) != split.get("n_val", len(idx_val)):
+        raise SystemExit(
+            f"split mismatch: reproduced {len(idx_val):,} val rows but the "
+            f"run recorded {split['n_val']:,}. data_v5/ has changed since "
+            f"training — re-run 03_train.py.")
+    print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
 
     model_path = DATA_DIR / "best_model_v5.keras"
     print(f"Loading {model_path.name} ...")
@@ -266,7 +397,12 @@ def main():
         X["arsenal_mask"][idx_val],
     ]
     print("Predicting...")
-    y_pred_probs = model.predict(val_inputs, batch_size=2048, verbose=0)
+    pred = model.predict(val_inputs, batch_size=2048, verbose=0)
+    # A two-head model returns a dict; a single-head one returns an array.
+    if isinstance(pred, dict):
+        y_pred_probs, zone_probs = pred["output"], pred.get("zone_output")
+    else:
+        y_pred_probs, zone_probs = pred, None
 
     history = None
     hist_path = DATA_DIR / "training_history_v5.json"
@@ -277,8 +413,22 @@ def main():
     report = build_report(
         y_labels[idx_val], y_pred_probs,
         X["pitcher_id"][idx_tr], y_labels[idx_tr],
-        X["pitcher_id"][idx_val], pitch_classes, history,
+        X["pitcher_id"][idx_val], pitch_classes, history, split_desc,
     )
+
+    zone_path = DATA_DIR / "y_zone.npy"
+    if zone_probs is not None and zone_path.exists():
+        y_zone = np.load(zone_path)
+        zr, zv = y_zone[idx_tr], y_zone[idx_val]
+        report += "\n\n" + build_location_report(
+            np.where(zv >= 0, zv, 0).astype(np.int64), zone_probs,
+            (zv >= 0).astype(np.float32),
+            X["pitcher_id"][idx_tr],
+            np.where(zr >= 0, zr, 0).astype(np.int64),
+            (zr >= 0).astype(np.float32),
+            X["pitcher_id"][idx_val],
+            meta.get("zone_classes", []),
+        )
     print("\n" + report)
     write_report(report)
 

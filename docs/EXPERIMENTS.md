@@ -539,3 +539,83 @@ Verified on synthetic data, where locations are generated from
 independent noise: the head correctly scores 41.1% against a 43.4%
 baseline and collapses onto the two commonest zones. A no-signal target
 produces a negative result, so the measurement is not self-flattering.
+
+---
+
+## Runs 9a / 9b — 4 seasons + location head (2026-09-25)
+
+Data: 2022-2025, 2,863,345 pitches (3 seasons -> 4, +33%).
+
+| run | intended split | actual split | top-1 | top-3 | log-loss | FB-family |
+|---|---|---|---|---|---|---|
+| 8 | random | random | **48.2%** | 92.0% | **1.1566** | — |
+| 9a | random | random (572,669 val) | 47.3% | 91.5% | 1.1755 | 62.7% |
+| 9b | temporal, hold out 2025 | **random (572,669 val)** | 47.6% | 91.5% | 1.1744 | 62.9% |
+
+### 9b did not run temporally — the config edit never took effect
+
+Both reports score exactly 572,669 validation rows with identical
+per-class supports (CH 60983, CU 38868, FF 185506, ...). That is 20.000%
+of the dataset — a random split. A 2025 holdout would be ~700K rows with
+a different class mix. The two runs differ only in training stochasticity.
+
+**There is still no temporal number.** The CRITICAL split defect is open.
+
+Accidental value: 9a and 9b are the same experiment run twice, so they
+give the first **seed-variance estimate** — +-0.3 points top-1 and
++-0.001 nats. Any future lift smaller than that is noise. Runs 5-8 were
+all compared without knowing this.
+
+Fix: `03_train.py` now writes `data_v5/split_v5.json` and both the
+startup banner and the report header print the split. `evaluate_model.py`
+reads that file instead of keeping a second copy of the config, and
+refuses to score if the reproduced row count disagrees with the run's.
+
+### The location head FAILED its pre-registered criterion
+
+Required >= +2 points over the pitcher's commonest zone. Delivered
+**+0.0** on both baselines — 40.8% model vs 40.8% for a constant guess,
+with heart recall 0.0% and shadow recall 99.9%. The argmax never leaves
+the plurality class.
+
+Verdict by the rule fixed in advance: **fail**. Not rescued.
+
+But accuracy cannot decide this head, and that is a flaw in the criterion
+I wrote, not a reason to accept the head. `shadow` is the plurality zone
+in nearly every conditioning cell, so an argmax pinned to it is the
+arithmetically correct response to a mildly informative distribution. The
+head can carry real information and still show 0.0% recall elsewhere.
+This is the same error AGENTS.md already warns about for the type head —
+"flat average accuracy is the wrong statistic" — repeated on a new head.
+
+So a **new, separately pre-registered** test, which is not a retroactive
+pass for the old one:
+
+- **zone log-loss** must beat both the league zone mix and the smoothed
+  pitcher zone mix. Log-loss moves when argmax structurally cannot.
+- **heart vs rest** — "is this one over the plate?", the location
+  analogue of the hard/soft call, and the only form of this a hitter can
+  act on — must beat the ~24% base rate by a real margin on a slice worth
+  quoting.
+
+If log-loss lift is <= 0, the head is dead and comes out.
+
+Negative control passes: on synthetic data with locations drawn from
+noise, zone log-loss comes out **0.085 nats WORSE** than baseline and the
+heart table shows +0.3% at its only populated threshold.
+
+### The type head also got worse, and two things changed at once
+
+Run 8 -> 9a is -0.9 points top-1 and +0.019 nats, both well outside the
++-0.3 / +-0.001 seed noise. But runs 9a/9b changed the season count AND
+added the location head, which violates the one-change-per-run rule.
+
+Leading suspect is capacity theft. The trunk narrows to a 64-unit
+bottleneck and the zone head hangs off that same 64-dim vector, so zone
+gradients reshape a representation the type head depends on. Loss weight
+0.3 bounds the loss contribution, not the representational damage.
+
+Run 10 isolates it: 4 seasons, random split, `ENABLE_LOCATION_HEAD =
+False`. If top-1 returns to ~48.2%, the head is a net negative and comes
+out regardless of what its own log-loss says. If it stays ~47.4%, the
+extra season explains the drop and the head is exonerated.
