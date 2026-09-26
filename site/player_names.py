@@ -41,6 +41,7 @@ import os
 import random
 import sys
 import tempfile
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -57,6 +58,7 @@ CHUNK_SIZE = 100
 MAX_URL_LEN = 1800
 TIMEOUT_S = 15
 RETRIES = 3
+_SSL_CTX = None
 BACKOFF_S = 1.5          # multiplied by 2**attempt, plus jitter
 PAUSE_BETWEEN_CHUNKS_S = 0.2
 USER_AGENT = "NextPitchAI/6 (+https://github.com/; contact: site admin)"
@@ -234,11 +236,40 @@ def _chunks(ids):
         yield batch
 
 
+class CertificateError(RuntimeError):
+    """TLS verification failed — actionable, and not worth retrying."""
+
+
+def _ssl_context():
+    """
+    A verifying SSL context that also works on macOS.
+
+    Python builds from python.org ship their own OpenSSL and do NOT read
+    the system keychain, so every HTTPS call fails with
+    CERTIFICATE_VERIFY_FAILED until you run "Install Certificates.command".
+    certifi carries the CA bundle and is almost always already present
+    (requests and pybaseball both depend on it), so prefer it and fall
+    back to the default store.
+
+    Verification is never disabled. An unverified fetch of player names
+    is not worth teaching anyone that pattern.
+    """
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        try:
+            import certifi
+            _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            _SSL_CTX = ssl.create_default_context()
+    return _SSL_CTX
+
+
 def _http_get_json(url):
     """One GET. Raises on failure; retry policy lives in _fetch_chunk."""
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
+    with urllib.request.urlopen(req, timeout=TIMEOUT_S,
+                               context=_ssl_context()) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -285,6 +316,12 @@ def _fetch_chunk(batch):
             if not transient:
                 return {}
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            # A certificate failure will not fix itself on retry, and
+            # repeating it 3x per chunk across every chunk buries the one
+            # line that tells you how to fix it.
+            if isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError) \
+                    or isinstance(exc, ssl.SSLCertVerificationError):
+                raise CertificateError(str(exc))
             log.warning("MLB API request failed for %d ids (attempt %d/%d): %s",
                         len(batch), attempt + 1, RETRIES, exc)
         if attempt < RETRIES - 1:
@@ -320,7 +357,27 @@ def fetch_names(ids, cache_path=CACHE_PATH, force=False):
     gained, failures, chunks = 0, 0, 0
     for batch in _chunks(wanted):
         chunks += 1
-        got = _fetch_chunk(batch)
+        try:
+            got = _fetch_chunk(batch)
+        except CertificateError as exc:
+            # Stop the whole run on the first one. It will fail
+            # identically for every remaining chunk, and repeating it
+            # buries the single line that says how to fix it.
+            log.error("TLS certificate verification failed: %s", exc)
+            log.error("")
+            log.error("Python cannot verify HTTPS certificates on this "
+                      "machine. On macOS this is the usual cause: builds "
+                      "from python.org do not read the system keychain.")
+            log.error("Fix it with either of:")
+            log.error("    pip install certifi          # this script "
+                      "prefers it automatically")
+            log.error("    open '/Applications/Python 3.x/"
+                      "Install Certificates.command'")
+            log.error("")
+            log.error("Names are cosmetic — the site works without them, "
+                      "showing numeric MLB ids. Re-run this script once "
+                      "certificates work and rebuild the bundle.")
+            break
         if not got:
             failures += 1
         for pid, rec in got.items():

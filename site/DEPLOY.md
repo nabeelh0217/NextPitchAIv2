@@ -131,8 +131,21 @@ Check `pip list` in the build log for tensorflow or scikit-learn, and
 that `--workers 2` was not raised.
 
 **Pickers show `Pitcher 605483`.** `player_names.json` is missing or
-empty. Run `.venv/bin/python site/player_names.py --from-serving` with internet,
-rebuild, commit. The site works fine this way — it is only cosmetic.
+empty. Run `.venv/bin/python site/player_names.py --from-serving` with
+internet, rebuild, commit. The site works fine this way — names are
+cosmetic.
+
+**`CERTIFICATE_VERIFY_FAILED` during the name fetch.** Python cannot
+verify HTTPS certificates. On macOS this is normal for python.org
+builds, which ship their own OpenSSL and ignore the system keychain:
+
+```bash
+.venv/bin/pip install certifi     # the script prefers it automatically
+# or: open "/Applications/Python 3.11/Install Certificates.command"
+```
+
+Then re-run the name fetch and rebuild. The bundle itself builds fine
+without names.
 
 **No claim panel.** `product_claim_v5.json` is not in the bundle. Run
 `analyze_actionability.py`, then rebuild. Do not hand-write the numbers
