@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from numpy_model import NumpyModel  # noqa: E402
 from pitch_features import build_context_features  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -51,7 +53,6 @@ class Predictor:
             raise NotBuilt(
                 "site/serving/ is missing — run "
                 "`python site/build_serving_artifacts.py` after training.")
-        import tensorflow as tf
 
         self.meta = json.loads((SERVING / "meta_v5.json").read_text())
         self.smeta = json.loads((SERVING / "serving_meta.json").read_text())
@@ -86,8 +87,17 @@ class Predictor:
         self.temperature = float((self.claim or {}).get("temperature", 1.0))
         self.threshold = float(rec.get("threshold", 0.65))
 
-        self.model = tf.keras.models.load_model(
-            DATA_DIR / "best_model_v5.keras", compile=False)
+        # NumPy, not TensorFlow. Importing TF costs ~660MB RSS against a
+        # 512MB box; the exported weights run the same graph in ~30MB and
+        # export_model.py refuses to write them unless they match Keras to
+        # better than 1e-4.
+        w, a = SERVING / "model_weights.npz", SERVING / "model_arch.json"
+        if not (w.exists() and a.exists()):
+            raise NotBuilt(
+                f"{w.name} / {a.name} missing — run "
+                f"`python site/export_model.py` (needs TensorFlow, so run it "
+                f"locally, not on the server).")
+        self.model = NumpyModel(w, a)
 
     # ---------- player search ----------
     def _index(self, table, role):
@@ -108,7 +118,10 @@ class Predictor:
                 # anyone has run the name fetch; it never renders blank.
                 "name": info.get("name") or f"{label} {int(pid_)}",
                 "named": bool(info.get("name")),
-                "hand": info.get("hand") or (
+                # A pitcher's throwing hand and a batter's side are
+                # different fields; the same id can appear in both tables.
+                "hand": (info.get("hand") if role == "pitcher"
+                         else info.get("bats")) or (
                     "R" if int(r.get("hand", 0)) == 0 else "L"),
                 "n": int(r.get("n_pitches", 0)),
             })
@@ -269,10 +282,12 @@ class Predictor:
         park = np.array([s.get("park_id", 0)], np.int32)
         catcher = np.array([s.get("catcher_id", 0)], np.int32)
 
-        pred = self.model.predict(
-            [self._sequence(pitcher, s.get("recent", [])), ctx,
-             pi, bi, ph, bh, park, catcher, mask], verbose=0)
-        probs = (pred["output"] if isinstance(pred, dict) else pred)[0]
+        probs = self.model.predict({
+            "seq": self._sequence(pitcher, s.get("recent", [])), "ctx": ctx,
+            "pitcher_id": pi, "batter_id": bi,
+            "pitcher_hand": ph, "batter_hand": bh,
+            "park_id": park, "catcher_id": catcher,
+            "arsenal_mask": mask})[0]
 
         # Same temperature the gate measured the claim at.
         if self.temperature and self.temperature != 1.0:
