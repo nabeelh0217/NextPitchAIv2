@@ -39,18 +39,55 @@ from evaluate_model import load_split, FASTBALL_FAMILY  # noqa: E402
 from numpy_model import NumpyModel  # noqa: E402
 
 BATCH = 4096
+# Standard deviation of the error a user makes typing a pitch mix from
+# memory, in SCALED units. Roughly a few percentage points per pitch.
+MIX_NOISE_SD = 0.25
 THRESHOLDS = (0.60, 0.65, 0.70, 0.75, 0.80)
 
 
-def run(model, X, idx, force_unknown_pitcher):
-    """Predicted probabilities over idx, optionally blanking pitcher id."""
+def run(model, X, idx, mode, cols=None, league=None, rng=None):
+    """
+    Predicted probabilities over idx under one of three conditions.
+
+      full      — as the site serves a known MLB pitcher
+      no-id     — pitcher embedding only is blanked
+      custom    — everything the site does NOT have for a hand-entered
+                  pitcher: no embedding, no zone tendencies, no matchup
+                  history, and an arsenal prior the user typed from
+                  memory rather than the exact expanding statistic
+
+    Only `custom` answers the question the custom-arsenal mode poses.
+    `no-id` is a diagnostic: it isolates how much the embedding alone is
+    worth, which turns out to be very little because the pitcher's mix
+    is also in the context vector.
+    """
     out = []
     for i in range(0, len(idx), BATCH):
         sl = idx[i:i + BATCH]
-        pid = (np.zeros(len(sl), np.int32) if force_unknown_pitcher
-               else X["pitcher_id"][sl])
+        ctx = np.array(X["ctx"][sl], dtype=np.float32)
+        pid = np.array(X["pitcher_id"][sl], np.int32)
+
+        if mode in ("no-id", "custom"):
+            pid = np.zeros(len(sl), np.int32)
+        if mode == "custom":
+            a, m, f, z = cols["ars"], cols["match"], cols["fam"], cols["zone"]
+            # A hand-entered mix is a rounded guess, not the exact
+            # expanding prior. Perturb it so the measurement reflects the
+            # accuracy a real user would get, not a best case they cannot
+            # reach.
+            ars = ctx[:, a]
+            if rng is not None:
+                ars = ars + rng.normal(0.0, MIX_NOISE_SD, ars.shape)
+            ctx[:, a] = ars
+            # No matchup history: it backs off to the pitcher's own mix,
+            # with zero prior meetings.
+            ctx[:, m] = ars
+            ctx[:, f] = league["fam"]
+            # No per-pitcher location tendencies, only the league's.
+            ctx[:, z] = league["zone"]
+
         out.append(model.predict({
-            "seq": X["seq"][sl], "ctx": X["ctx"][sl],
+            "seq": X["seq"][sl], "ctx": ctx,
             "pitcher_id": pid, "batter_id": X["batter_id"][sl],
             "pitcher_hand": X["pitcher_hand"][sl],
             "batter_hand": X["batter_hand"][sl],
@@ -102,11 +139,28 @@ def main():
     scout = np.where(cnt[ptr[idx_val], balls, strikes] >= 40,
                      rate[ptr[idx_val], balls, strikes], league_rate) >= 0.5
 
+    # Column groups the custom mode has to give up.
+    cols = {
+        "ars": [names.index(f"arsenal_{c}") for c in classes],
+        "match": [names.index(f"matchup_{c}") for c in classes],
+        "fam": names.index("matchup_familiarity"),
+        "zone": [names.index(f"zoneprior_{z}") for z in meta["zone_classes"]],
+    }
+    # League values in SCALED space: the training mean is, by definition,
+    # zero after standardisation.
+    league = {"fam": 0.0, "zone": 0.0}
+    rng = np.random.default_rng(0)
+
+    print("  full   = as served for a known MLB pitcher")
+    print("  no-id  = pitcher embedding blanked (diagnostic only)")
+    print("  custom = what the custom-arsenal mode actually has:")
+    print("           no embedding, no zone tendencies, no matchup history,")
+    print(f"           and a typed mix (noise sd {MIX_NOISE_SD} scaled)\n")
     print(f"{'':16s}{'top-1':>9}{'hard/soft':>11}"
           f"{'speaks':>9}{'tool':>8}{'table':>8}{'edge':>8}")
     results = {}
-    for label, blank in (("full", False), ("no-id", True)):
-        probs = run(model, X, idx_val, blank)
+    for label in ("full", "no-id", "custom"):
+        probs = run(model, X, idx_val, label, cols, league, rng)
         top1 = float((probs.argmax(1) == yv).mean())
         p_hard = probs[:, hard_i].sum(1)
         pred_hard = (p_hard >= 0.5).astype(int)
@@ -131,21 +185,29 @@ def main():
                   f"{'never speaks on >=10%':>33}")
 
     print()
-    f, n = results["full"], results["no-id"]
-    print(f"Losing the pitcher's identity costs {f[0] - n[0]:+.1%} top-1 "
-          f"and {f[1] - n[1]:+.1%} on the hard/soft call.")
-    if f[2] and n[2]:
-        fe, ne = f[2][3] - f[2][2], n[2][3] - n[2][2]
-        print(f"Edge over the count-split table: {fe:+.1%} -> {ne:+.1%}")
+    f, n, c = results["full"], results["no-id"], results["custom"]
+    print(f"Blanking the embedding alone costs {f[0] - n[0]:+.1%} top-1. If that")
+    print("is near zero, the embedding is redundant with arsenal_prior — the")
+    print("pitcher's mix is in the context vector too, and the model reads it")
+    print("there. That is a finding about the model, NOT a result about the")
+    print("custom mode.\n")
+    if f[2] and c[2]:
+        fe, ce = f[2][3] - f[2][2], c[2][3] - c[2][2]
+        print(f"What the custom mode actually costs: {f[0] - c[0]:+.1%} top-1, "
+              f"edge {fe:+.1%} -> {ce:+.1%}")
         print()
-        if ne >= 0.02:
-            print("The custom-arsenal mode carries a real edge. Ship it, with")
-            print("its own coverage and accuracy numbers — not the MLB ones.")
+        print("NOTE: these absolute edges are NOT section 6's. There is no")
+        print("temperature calibration here and the scout table is built")
+        print("slightly differently. Compare the rows to each other, and quote")
+        print("analyze_actionability.py for the product claim.")
+        print()
+        if ce >= 0.02:
+            print("VERDICT: the custom mode keeps a real edge. It can be shipped")
+            print("with ITS OWN numbers — never the MLB ones.")
         else:
-            print("The custom-arsenal mode does NOT beat the table a hitter")
-            print("could write himself. Offer it as a pitch-mix explorer, and")
-            print("do not attach the +4.2 point claim to it — that number was")
-            print("measured with pitcher identity, which this mode does not have.")
+            print("VERDICT: the custom mode does not beat a table a hitter could")
+            print("write himself. Ship it as a pitch-mix explorer and attach no")
+            print("accuracy claim.")
 
 
 if __name__ == "__main__":
