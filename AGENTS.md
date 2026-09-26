@@ -11,7 +11,8 @@ A model that predicts the **next pitch type** an MLB pitcher will throw
 from game state, matchup history, and the pitcher's own recent sequence.
 The softmax is **masked to the pitcher's real arsenal inside the model**,
 so it can only ever predict pitches that pitcher actually throws. A Flask
-website (`site/`, not yet built) will serve these predictions.
+app in `site/` serves these predictions; it is built and deploys to
+Render (see **Deployment**).
 
 ## The goal is a hitter's edge, NOT top-1 accuracy
 
@@ -60,7 +61,7 @@ Two rules that follow, and must not be softened:
 
 | Path | Role |
 |---|---|
-| `01_scrape_statcast.py` | Pulls 2022–2024 Statcast pitches via pybaseball → `statcast_raw_v5.parquet` (atomic write) |
+| `01_scrape_statcast.py` | Pulls 2022–2025 Statcast pitches via pybaseball → `statcast_raw_v5.parquet` (atomic write) |
 | `02_preprocess.py` | Leakage-free feature engineering → `data_v5/` arrays, scalers, ID maps, website artifacts |
 | `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` + `eval_report_v5.txt` |
 | `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining). `03_train.py` imports its `build_report` so the two can't drift |
@@ -72,9 +73,14 @@ Two rules that follow, and must not be softened:
 | `pitch_features.py` | **Shared feature vocabulary.** Pitch/outcome/zone classes and every pure feature builder. Imported by BOTH `02_preprocess.py` and the site so training and serving cannot drift. numpy + pandas ONLY — keep it that way |
 | `site/` | **The product.** Flask app serving the selective overlay. `build_serving_artifacts.py` -> `export_model.py` -> `predictor.py` -> `app.py` |
 | `site/numpy_model.py` | TensorFlow-free inference. `export_model.py` converts the Keras graph to `model_weights.npz` and verifies parity before writing |
+| `site/player_names.py` | MLB Stats API id→name lookup, cached to `site/serving/player_names.json`. Network-optional; the site falls back to numeric ids |
+| `site/DEPLOY.md` | The Render runbook: build, commit the bundle, custom domain, memory, troubleshooting |
+| `render.yaml` | Render blueprint. gunicorn `--workers 2 --preload`, health check `/healthz` |
 | `.cursor/rules/` | Cursor-scoped rules (point back here) |
 
-`data_v5/` and `*.parquet` are gitignored (GBs). The `_v5` file naming is
+`data_v5/` and `*.parquet` are gitignored (GBs), with one deliberate
+exception: `site/serving/` is committed so Render can serve it. The
+`_v5` file naming is
 kept for runner continuity even though the schema is v6 — `meta_v5.json`
 carries `"version": 6`.
 
@@ -197,9 +203,10 @@ features do anything at all**. 10-class top-1 reads lower than the old
   `data_v5/product_claim_v5.json`, which `analyze_actionability.py`
   writes from held-out rows — nothing is hardcoded, so a retrain updates
   the site's claim instead of leaving a stale boast in the HTML.
-- **Serving-bundle rule:** `site/serving/` is derived and gitignored.
-  Rebuild it after EVERY training run or the app serves the previous
-  model's lookups against the new model.
+- **Serving-bundle rule:** `site/serving/` is derived but **committed** —
+  Render builds from the repo and cannot see `data_v5/`. Rebuild AND
+  commit it after EVERY training run, or the app serves the previous
+  model's lookups against the new weights.
 - Serving tables are keyed by **raw MLB id** with the encoded embedding
   row in an `enc` column. Mixing the two makes every lookup miss
   silently and fall back to league averages while the site still returns
@@ -273,4 +280,6 @@ TensorFlow is needed ONLY for the offline `export_model.py` step.
 - Comments explain constraints the code can't show (leakage reasoning,
   why a value was chosen), not what the next line does.
 - Never commit `.venv/`, `data_v5/`, `*.parquet`, `*.keras`, `*.npy`,
-  `*.pkl`.
+  `*.pkl` — except inside `site/serving/`, which is the deploy bundle and
+  is committed on purpose. `.gitignore` encodes that carve-out; the
+  bundle is size-capped so it cannot quietly grow.

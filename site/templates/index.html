@@ -44,14 +44,31 @@
 <div class="grid">
 <form id="f" class="panel">
   <h2>Situation</h2>
-  <label>Pitcher
-    <select name="pitcher" id="pitcher">
-      {% for p in pitchers %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-    </select></label>
-  <label>Batter
-    <select name="batter">
-      {% for b in batters %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
-    </select></label>
+
+  <div id="namehint" class="warn" hidden>
+    Player names aren't loaded, so the pickers show MLB ids. Run
+    <code>python site/player_names.py --from-serving</code> on a machine with
+    internet, then rebuild the serving bundle.
+  </div>
+
+  <label for="pitcher-input">Pitcher</label>
+  <div class="combo" data-role="pitcher">
+    <input id="pitcher-input" class="combo-input" type="text" role="combobox"
+           autocomplete="off" aria-expanded="false" aria-autocomplete="list"
+           aria-controls="pitcher-list" placeholder="Type a name…">
+    <input type="hidden" name="pitcher" class="combo-value">
+    <ul id="pitcher-list" class="combo-list" role="listbox" hidden></ul>
+  </div>
+
+  <label for="batter-input">Batter</label>
+  <div class="combo" data-role="batter">
+    <input id="batter-input" class="combo-input" type="text" role="combobox"
+           autocomplete="off" aria-expanded="false" aria-autocomplete="list"
+           aria-controls="batter-list" placeholder="Type a name…">
+    <input type="hidden" name="batter" class="combo-value">
+    <ul id="batter-list" class="combo-list" role="listbox" hidden></ul>
+  </div>
+
   <div class="row">
     <label>Balls <select name="balls">{% for i in range(4) %}<option>{{ i }}</option>{% endfor %}</select></label>
     <label>Strikes <select name="strikes">{% for i in range(3) %}<option>{{ i }}</option>{% endfor %}</select></label>
@@ -84,16 +101,109 @@ const PITCHES = {{ pitches|tojson }};
 const OUTCOMES = {{ outcomes|tojson }};
 let arsenal = PITCHES;
 
-async function loadArsenal() {
-  const r = await fetch('/api/arsenal/' + document.getElementById('pitcher').value);
-  if (r.ok) { arsenal = (await r.json()).arsenal; refreshRows(); }
+/* ---------- combobox ----------
+   The visible text and the submitted id are separate fields, so they can
+   fall out of sync. Any edit to the text clears the id: it is better to
+   refuse to submit than to send a stale id under a name the user has
+   since changed. */
+function makeCombo(root) {
+  const role = root.dataset.role;
+  const input = root.querySelector('.combo-input');
+  const hidden = root.querySelector('.combo-value');
+  const list = root.querySelector('.combo-list');
+  let items = [], active = -1, seq = 0;
+
+  const close = () => {
+    list.hidden = true; input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant'); active = -1;
+  };
+
+  function render() {
+    if (!items.length) { close(); return; }
+    list.innerHTML = items.map((p, i) =>
+      `<li role="option" id="${role}-opt-${i}" class="${i === active ? 'on' : ''}"
+           data-i="${i}" aria-selected="${i === active}">
+         <span class="nm">${p.name}</span><span class="meta">${p.hand || ''}</span>
+       </li>`).join('');
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    if (active >= 0) {
+      input.setAttribute('aria-activedescendant', `${role}-opt-${active}`);
+      const el = list.children[active];
+      if (el) el.scrollIntoView({block: 'nearest'});
+    }
+  }
+
+  function commit(i) {
+    const p = items[i];
+    if (!p) return;
+    input.value = p.name;
+    hidden.value = p.id;
+    close();
+    root.dispatchEvent(new CustomEvent('picked', {bubbles: true, detail: p}));
+  }
+
+  async function search() {
+    const mine = ++seq;
+    try {
+      const r = await fetch(`/api/players?role=${role}&q=`
+                            + encodeURIComponent(input.value) + '&limit=20');
+      if (mine !== seq) return;              // a later keystroke already won
+      if (!r.ok) { items = []; list.innerHTML =
+        '<li class="dead">Player list unavailable — build the serving bundle.</li>';
+        list.hidden = false; return; }
+      const d = await r.json();
+      items = d.players || [];
+      active = items.length ? 0 : -1;
+      if (d.named === false) document.getElementById('namehint').hidden = false;
+      render();
+    } catch (e) {
+      if (mine !== seq) return;
+      items = []; list.innerHTML = '<li class="dead">Could not reach the server.</li>';
+      list.hidden = false;
+    }
+  }
+
+  let t;
+  input.addEventListener('input', () => {
+    hidden.value = '';                        // text edited -> id no longer valid
+    clearTimeout(t); t = setTimeout(search, 150);
+  });
+  input.addEventListener('focus', () => { if (!items.length) search(); else render(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (list.hidden) { search(); return; }
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      render();
+    } else if (e.key === 'Enter') {
+      if (!list.hidden && active >= 0) { e.preventDefault(); commit(active); }
+    } else if (e.key === 'Escape') { close(); }
+  });
+  list.addEventListener('mousedown', e => {          // before blur
+    const li = e.target.closest('li[data-i]');
+    if (li) { e.preventDefault(); commit(+li.dataset.i); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 120));
+  return {input, hidden, search};
+}
+
+const combos = {};
+document.querySelectorAll('.combo').forEach(c => { combos[c.dataset.role] = makeCombo(c); });
+
+/* ---------- recent pitches ---------- */
+async function loadArsenal(id) {
+  try {
+    const r = await fetch('/api/arsenal/' + id);
+    if (r.ok) { arsenal = (await r.json()).arsenal || PITCHES; refreshRows(); }
+  } catch (e) { /* keep the previous arsenal */ }
 }
 function rowHtml() {
   return '<div class="prow">'
     + '<select class="pt">' + arsenal.map(p => `<option>${p}</option>`).join('') + '</select>'
     + '<select class="oc">' + OUTCOMES.map(o => `<option>${o}</option>`).join('') + '</select>'
     + '<label class="sa"><input type="checkbox" class="ab" checked> same AB</label>'
-    + '<button type="button" class="rm">&times;</button></div>';
+    + '<button type="button" class="rm" aria-label="remove">&times;</button></div>';
 }
 function refreshRows() {
   document.querySelectorAll('.prow .pt').forEach(sel => {
@@ -107,13 +217,22 @@ document.getElementById('add').onclick = () =>
 document.getElementById('recent').onclick = e => {
   if (e.target.classList.contains('rm')) e.target.closest('.prow').remove();
 };
-document.getElementById('pitcher').onchange = loadArsenal;
+document.querySelector('.combo[data-role=pitcher]')
+  .addEventListener('picked', e => loadArsenal(e.detail.id));
 
+/* ---------- predict ---------- */
 document.getElementById('f').onsubmit = async e => {
   e.preventDefault();
+  const out = document.getElementById('out');
+  const pid = combos.pitcher.hidden.value, bid = combos.batter.hidden.value;
+  if (!pid || !bid) {
+    out.innerHTML = '<div class="warn">Pick a pitcher and a batter from the '
+      + 'list — typing a name without selecting it leaves no player chosen.</div>';
+    return;
+  }
   const f = new FormData(e.target);
   const body = {
-    pitcher: +f.get('pitcher'), batter: +f.get('batter'),
+    pitcher: +pid, batter: +bid,
     balls: +f.get('balls'), strikes: +f.get('strikes'), outs: +f.get('outs'),
     inning: +f.get('inning'), pitch_of_ab: +f.get('pitch_of_ab'),
     pitch_count_game: +f.get('pitch_count_game'),
@@ -123,12 +242,14 @@ document.getElementById('f').onsubmit = async e => {
       outcome: r.querySelector('.oc').value,
       same_ab: r.querySelector('.ab').checked }))
   };
-  const out = document.getElementById('out');
   out.innerHTML = '<p class="muted">Thinking…</p>';
-  const res = await fetch('/api/predict', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)});
-  const d = await res.json();
+  let d;
+  try {
+    const res = await fetch('/api/predict', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)});
+    d = await res.json();
+  } catch (err) { out.innerHTML = `<div class="err">Server unreachable.</div>`; return; }
   if (d.error) { out.innerHTML = `<div class="err"><pre>${d.error}</pre></div>`; return; }
 
   const unknown = (!d.known_pitcher || !d.known_batter)
@@ -157,7 +278,6 @@ document.getElementById('f').onsubmit = async e => {
        <h3>Full distribution</h3>${dist}`);
 };
 document.getElementById('add').click();
-loadArsenal();
 </script>
 </body>
 </html>

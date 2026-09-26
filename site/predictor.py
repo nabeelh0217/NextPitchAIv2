@@ -80,7 +80,13 @@ class Predictor:
             self.matchup = self.matchup.set_index(["pitcher", "batter"])
 
         # The claim the site is allowed to make, straight from the gate.
-        claim_path = DATA_DIR / "product_claim_v5.json"
+        # From the bundle first: data_v5/ does not exist on the server, and
+        # reading the claim only from there would silently drop the
+        # coverage-and-accuracy panel in production — the one thing the
+        # site is required to show.
+        claim_path = SERVING / "product_claim_v5.json"
+        if not claim_path.exists():
+            claim_path = DATA_DIR / "product_claim_v5.json"
         self.claim = (json.loads(claim_path.read_text())
                       if claim_path.exists() else None)
         rec = (self.claim or {}).get("recommended") or {}

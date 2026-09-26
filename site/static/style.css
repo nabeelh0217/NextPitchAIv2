@@ -53,3 +53,19 @@ pre { white-space:pre-wrap; font-size:12px; }
 @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
 .warn { background:#3a2a12; border:1px solid #7a5a20; color:#ffce7a;
         border-radius:8px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
+
+/* ---- combobox ---- */
+.combo { position:relative; margin-bottom:10px; }
+.combo-input { width:100%; padding:8px; background:#0d1116; color:var(--ink);
+  border:1px solid var(--line); border-radius:8px; font-size:14px; }
+.combo-input:focus { outline:2px solid var(--soft); outline-offset:1px; }
+.combo-list { position:absolute; z-index:20; left:0; right:0; top:100%;
+  margin:4px 0 0; padding:4px; list-style:none; max-height:240px;
+  overflow-y:auto; background:#0d1116; border:1px solid var(--line);
+  border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.5); }
+.combo-list li { display:flex; justify-content:space-between; gap:8px;
+  padding:7px 9px; border-radius:6px; cursor:pointer; font-size:14px; }
+.combo-list li.on { background:#1d2732; }
+.combo-list li .meta { color:var(--dim); font-size:12px; }
+.combo-list li.dead { color:var(--dim); cursor:default; font-style:italic; }
+code { background:#0d1116; padding:1px 5px; border-radius:4px; font-size:12px; }
