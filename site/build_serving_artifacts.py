@@ -84,7 +84,11 @@ def main():
     bid = np.load(DATA_DIR / "X_batter_id.npy")
     p_hand = np.load(DATA_DIR / "X_pitcher_hand.npy")
     b_hand = np.load(DATA_DIR / "X_batter_hand.npy")
-    X_ctx = np.load(DATA_DIR / "X_ctx.npy")
+    # Memory-mapped: X_ctx is ~0.7 GB on four seasons and we need about
+    # 4,500 rows of it. Reading it whole, widening to float64 and
+    # inverse-transforming the lot peaked near 3.6 GB and the OS killed
+    # the process on a laptop.
+    X_ctx = np.load(DATA_DIR / "X_ctx.npy", mmap_mode="r")
     ctx_scaler = joblib.load(DATA_DIR / "context_scaler_v5.pkl")
 
     idx_tr, idx_val, split_desc = load_split(y)
@@ -102,9 +106,6 @@ def main():
 
     # Undo the scaler so the priors are readable probabilities again;
     # the app re-applies the same scaler after assembling a row.
-    print("Recovering raw context priors...")
-    raw = ctx_scaler.inverse_transform(X_ctx.astype(np.float64))
-
     ars_c = _cols(names, "arsenal_", n_pitch)
     zp_c = _cols(names, "zoneprior_", len(zones))
     seen_c = _cols(names, "seen_", n_pitch)
@@ -129,6 +130,11 @@ def main():
         last = np.flatnonzero(np.r_[srt[1:] != srt[:-1], True])
         return srt[last], order[last]
 
+    def unscale(rows):
+        """Undo the scaler for just these rows, straight off the mmap."""
+        return ctx_scaler.inverse_transform(
+            np.asarray(X_ctx[rows], dtype=np.float64))
+
     print("Building pitcher table...")
     enc, rows = last_rows(pid)
     keep = [i for i, e in enumerate(enc) if int(e) in enc2raw_p]
@@ -138,10 +144,11 @@ def main():
     # Pitch counts rank the pickers so an empty search box offers the
     # players someone is actually likely to want.
     pit["n_pitches"] = np.bincount(pid, minlength=int(pid.max()) + 1)[enc]
+    raw = unscale(rows)
     for i, c in enumerate(classes):
-        pit[f"arsenal_{c}"] = raw[rows, ars_c[i]]
+        pit[f"arsenal_{c}"] = raw[:, ars_c[i]]
     for i, z in enumerate(zones):
-        pit[f"zoneprior_{z}"] = raw[rows, zp_c[i]]
+        pit[f"zoneprior_{z}"] = raw[:, zp_c[i]]
     pit["hand"] = p_hand[rows]
     for i, c in enumerate(classes):
         pit[f"mask_{c}"] = mask_tbl[enc, i]
@@ -154,12 +161,13 @@ def main():
     bat = pd.DataFrame({"batter_id": [enc2raw_b[int(e)] for e in enc],
                         "enc": enc.astype(int)})
     bat["n_pitches"] = np.bincount(bid, minlength=int(bid.max()) + 1)[enc]
+    raw = unscale(rows)
     for i, c in enumerate(classes):
-        bat[f"seen_{c}"] = raw[rows, seen_c[i]]
+        bat[f"seen_{c}"] = raw[:, seen_c[i]]
     for i, c in enumerate(classes):
-        bat[f"whiff_{c}"] = raw[rows, whiff_c[i]]
+        bat[f"whiff_{c}"] = raw[:, whiff_c[i]]
     for i, z in enumerate(zones):
-        bat[f"zoneseen_{z}"] = raw[rows, zs_c[i]]
+        bat[f"zoneseen_{z}"] = raw[:, zs_c[i]]
     bat["hand"] = b_hand[rows]
     bat.to_parquet(OUT_DIR / "batters.parquet", index=False)
 
@@ -171,11 +179,15 @@ def main():
                  "release_spin_rate", "pfx_x", "pfx_z"]
     if PARQUET.exists():
         df = pd.read_parquet(PARQUET, columns=["pitcher", "pitch_type"] + phys_cols)
-        from importlib.machinery import SourceFileLoader
-        pre = SourceFileLoader("pre", str(BASE_DIR / "02_preprocess.py")).load_module()
-        df["canon"] = df["pitch_type"].map(pre.PITCH_TYPE_CANON)
-        df = df.dropna(subset=["canon"])
-        phys = df.groupby(["pitcher", "canon"])[phys_cols].median().reset_index()
+        from pitch_features import PITCH_TYPE_CANON
+        # Categorical, and float32: 2.8M raw strings plus float64 physics
+        # is most of a gigabyte for what ends up a few thousand medians.
+        df["canon"] = df["pitch_type"].map(PITCH_TYPE_CANON).astype("category")
+        df = df.drop(columns=["pitch_type"]).dropna(subset=["canon"])
+        for c in phys_cols:
+            df[c] = df[c].astype(np.float32)
+        phys = (df.groupby(["pitcher", "canon"], observed=True)[phys_cols]
+                  .median().reset_index())
         league = df[phys_cols].median().to_dict()
     else:
         print(f"  WARNING: {PARQUET.name} not found — the app will fall back to")
