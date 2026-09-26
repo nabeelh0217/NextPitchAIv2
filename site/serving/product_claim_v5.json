@@ -1,0 +1,45 @@
+{
+  "split": "temporal, validate on 2025",
+  "temperature": 0.875,
+  "n_val": 729688,
+  "section5_lift_vs_scout": 0.007487001616492628,
+  "section5_verdict": "WEAK",
+  "slice": [
+    {
+      "threshold": 0.6,
+      "coverage": 0.5476422799881593,
+      "tool_accuracy": 0.6806645512602351,
+      "table_accuracy": 0.6418064703409341,
+      "edge": 0.038858080919300986
+    },
+    {
+      "threshold": 0.65,
+      "coverage": 0.35240130028176425,
+      "tool_accuracy": 0.7254407080884955,
+      "table_accuracy": 0.6830790649560751,
+      "edge": 0.04236164313242041
+    },
+    {
+      "threshold": 0.7,
+      "coverage": 0.20231523610090887,
+      "tool_accuracy": 0.7805618213470435,
+      "table_accuracy": 0.7404065651947137,
+      "edge": 0.04015525615232984
+    },
+    {
+      "threshold": 0.75,
+      "coverage": 0.11023204438061199,
+      "tool_accuracy": 0.8394728662895505,
+      "table_accuracy": 0.8077702492695966,
+      "edge": 0.031702617019953916
+    }
+  ],
+  "recommended": {
+    "threshold": 0.65,
+    "coverage": 0.35240130028176425,
+    "tool_accuracy": 0.7254407080884955,
+    "table_accuracy": 0.6830790649560751,
+    "edge": 0.04236164313242041
+  },
+  "shippable": true
+}

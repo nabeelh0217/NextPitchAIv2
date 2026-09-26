@@ -1,0 +1,13 @@
+# Serving dependencies ONLY — this is what Render installs.
+#
+# TensorFlow is deliberately absent. It is needed only for the OFFLINE
+# export step (site/export_model.py), which runs on your machine and
+# writes site/serving/model_weights.npz. Measured peak RSS: TensorFlow
+# loading the model is 663 MB, the whole stack below is 128 MB, and a
+# Render free instance has 512 MB. Adding tensorflow, keras, torch or
+# scikit-learn here silently reintroduces an out-of-memory crash.
+Flask>=3.0,<4.0
+gunicorn>=21.2,<24.0
+numpy>=1.26,<3.0
+pandas>=2.1,<3.0
+pyarrow>=14.0,<22.0

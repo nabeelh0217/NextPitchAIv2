@@ -1,0 +1,41 @@
+---
+description: Rules for editing the three pipeline scripts (scrape, preprocess, train) — leakage discipline, artifact contracts, evaluation
+globs: 01_scrape_statcast.py,02_preprocess.py,03_train.py
+alwaysApply: false
+---
+
+# Pipeline script rules
+
+## 02_preprocess.py
+- Any new historical/aggregate feature must be built with
+  `expanding_prior_dist` / `expanding_prior_rate` (or the same
+  cumsum-minus-current-row pattern). Full-dataset aggregates are only
+  allowed for the inference artifacts (`pitcher_priors`, arsenal mask,
+  matchup table, batter profiles) and the arsenal mask — never as model
+  features.
+- Do not reorder rows after the chronological sort.
+- `build_sequences` groups by `(game_pk, pitcher)`; keep the same-at-bat
+  flag as the last timestep feature.
+- If you change the feature layout, update `meta_v5.json` keys
+  (`seq_feats`, `ctx_feats`, `ctx_feature_names`, `pitch_classes`) — the
+  training script reads shapes from there, and the website will too.
+- Keep `data_v5/` and `_v5` artifact names; `run_pipeline.sh/.bat` check
+  `data_v5/meta_v5.json` to decide whether to skip preprocessing.
+
+## 03_train.py
+- The arsenal mask input must stay wired to the logits
+  (`logits + (1 - mask) * -1e9` before softmax). Removing it silently
+  reintroduces impossible predictions.
+- No `RandomOverSampler` / row duplication. Class balance is the
+  per-class alpha vector in `focal_loss`.
+- `train_test_split` on natural indices first; all evaluation on
+  `idx_val`.
+- Keep the printed evaluation block intact (top-1, top-3, baseline,
+  report, confusion matrix) — those are what get pasted back and logged.
+- Change ONE hyperparameter/architecture item per run.
+
+## 01_scrape_statcast.py
+- Write outputs to a temp path and `os.replace` into place.
+- Exit non-zero on failure paths (the runners rely on the exit code).
+- Adding a Statcast column: add it to `KEEP_COLUMNS`; downstream code
+  must tolerate its absence (older scrapes).

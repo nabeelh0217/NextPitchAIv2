@@ -1,5 +1,8 @@
 # Large data / model artifacts — never commit these
 *.parquet
+# .bak does not match *.parquet, so an old multi-GB scrape sitting next
+# to the current one would be staged by `git add -A` and pushed.
+*.parquet.bak
 *.npy
 *.keras
 *.pkl
@@ -17,4 +20,19 @@ venv/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+# .vscode/ is tracked on purpose: tasks.json + settings.json are the Cursor workflow
+
+# site/serving/ IS committed — Render has no access to data_v5/, so the
+# deployed app can only read what is in the repo. The bundle is small
+# (single-digit MB: pruned matchups, per-player priors, exported weights)
+# and build_serving_artifacts.py refuses to write one over BUNDLE_MAX_MB.
+# The blanket bans above still apply everywhere else, so re-allow the
+# specific extensions inside it. Rebuild it after EVERY retrain.
+!site/serving/
+!site/serving/**
+site/serving/*.pkl
+
+# Local note that TensorFlow cannot run on THIS machine, so the
+# export stops spawning a verification child that macOS reports as
+# a crash. Machine-specific; never commit it.
+site/.tf-unusable

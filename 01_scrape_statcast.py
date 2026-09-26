@@ -14,8 +14,13 @@ Usage:
 
 Output:
     statcast_raw_v5.parquet  (~2-4 GB for multiple seasons)
+
+v7 adds zone / sz_top / sz_bot for the location head. Everything else
+the model uses was already being scraped.
 """
 
+import os
+import sys
 import time
 from pathlib import Path
 from datetime import date, timedelta
@@ -30,13 +35,19 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_PATH = BASE_DIR / "statcast_raw_v5.parquet"
 
 # Seasons to pull — more data = better embeddings for pitcher/batter IDs.
-# Each full season is ~700k-750k pitches. 3 seasons gives ~2.2M rows.
-# Start with 2022-2024; add 2021 later if you want more.
+# Each full season is ~700k-750k pitches. 4 seasons gives ~2.9M rows.
 SEASONS = [
     ("2022-04-07", "2022-10-05"),
     ("2023-03-30", "2023-10-01"),
     ("2024-03-28", "2024-09-29"),
+    ("2025-03-18", "2025-09-28"),   # opens with the Tokyo Series
 ]
+
+# Adding seasons FORWARD is safe; adding them backward is not. The
+# sweeper (ST) barely existed as a Statcast label before 2023, so 2021
+# and earlier would inject a labelling shift that looks like a real
+# change in pitcher behaviour. 2025 is the closest season to deployment
+# and the most representative data available.
 
 # Columns we need for v5
 # (pybaseball returns ~90 columns; we keep only what matters)
@@ -62,10 +73,17 @@ KEEP_COLUMNS = [
     "stand",                                    # batter hand: R/L
     "p_throws",                                 # pitcher hand: R/L
 
-    # Pitch physics (for sequence features + future location prediction)
+    # Pitch physics (for sequence features + location prediction)
     "release_speed", "release_spin_rate",
     "plate_x", "plate_z",
     "pfx_x", "pfx_z",                          # horizontal/vertical movement
+
+    # v7: location target. sz_top/sz_bot are the BATTER-SPECIFIC strike
+    # zone for that pitch — "up" means something different to a 5'6"
+    # hitter than a 6'7" one, so a league-average zone would mislabel a
+    # lot of borderline pitches. `zone` is Statcast's own 1-14 label,
+    # kept as a cross-check on our derived attack zones.
+    "zone", "sz_top", "sz_bot",
 
     # v5: environment & personnel
     "home_team",                                # ballpark proxy (park factors)
@@ -139,7 +157,7 @@ def main():
 
     if not all_data:
         print("No data collected! Check your internet connection and pybaseball.")
-        return
+        sys.exit(1)
 
     combined = pd.concat(all_data, ignore_index=True)
     print(f"\n{'='*50}")
@@ -165,8 +183,18 @@ def main():
         ["game_pk", "at_bat_number", "pitch_number"]
     ).reset_index(drop=True)
 
-    # Save as parquet (much faster + smaller than CSV)
-    combined.to_parquet(OUTPUT_PATH, index=False)
+    if len(combined) == 0:
+        print("ERROR: no rows survived cleanup — refusing to write an empty file.")
+        sys.exit(1)
+
+    # Save as parquet (much faster + smaller than CSV). Write to a temp file
+    # first and atomically replace the final path only once the write has
+    # fully succeeded — so a closed window, sleep, or crash mid-write can
+    # never leave a corrupt/empty file sitting at OUTPUT_PATH (which a
+    # later run would otherwise mistake for a completed scrape).
+    tmp_path = OUTPUT_PATH.with_suffix(".parquet.tmp")
+    combined.to_parquet(tmp_path, index=False)
+    os.replace(tmp_path, OUTPUT_PATH)
     print(f"\nSaved to: {OUTPUT_PATH}")
     print(f"Final size: {len(combined):,} rows, {len(combined.columns)} columns")
 

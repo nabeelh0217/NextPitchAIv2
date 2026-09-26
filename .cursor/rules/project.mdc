@@ -1,0 +1,26 @@
+---
+description: NextPitchAI project context — read AGENTS.md first; hard invariants for the ML pipeline
+globs:
+alwaysApply: true
+---
+
+# NextPitchAI — always-on rules
+
+The full project context lives in `AGENTS.md` at the repo root. Read it
+before making changes; treat it as the source of truth over anything
+inferred from a single file. The run-by-run history is in
+`docs/EXPERIMENTS.md`.
+
+Non-negotiables (details and reasoning in `AGENTS.md`):
+
+- Historical features are expanding priors that EXCLUDE the current row.
+- Chronological sort (`game_date, game_pk, at_bat_number, pitch_number`)
+  precedes every prior and sequence computation.
+- Pitch sequences are the same pitcher's previous pitches in the game.
+- The arsenal mask is a model input applied to logits before softmax.
+- Split train/val before any resampling; report on the natural split.
+- One change per training run; append the result to `docs/EXPERIMENTS.md`.
+- Never commit `.venv/`, `data_v5/`, `*.parquet`, `*.keras`, `*.npy`, `*.pkl`.
+
+Before proposing a tuning change, check the "Do not retry" section of
+`docs/EXPERIMENTS.md`.

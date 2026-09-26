@@ -1,0 +1,35 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# Render builds from the GitHub repo and nothing else, so everything the
+# model needs must be committed. data_v5/ and the raw parquet are
+# gitignored and absent here; site/serving/ is committed and is the only
+# path by which the model reaches production. See site/DEPLOY.md.
+services:
+  - type: web
+    name: nextpitchai
+    runtime: python
+    plan: free
+    # Repo root, so `site.` imports and pitch_features.py both resolve.
+    rootDir: .
+    buildCommand: pip install -r site/requirements.txt
+    # --chdir site: app.py imports its siblings (predictor, numpy_model)
+    #   as top-level modules, matching how it runs locally.
+    # --workers 2: the stack measures ~128MB resident. Two workers fit
+    #   512MB with headroom; gunicorn's (2*cores)+1 default would OOM.
+    # --preload: load the model once in the master before forking, so
+    #   workers share those pages copy-on-write.
+    # --timeout 120: a free instance cold-starts slowly; the default 30s
+    #   can kill the first request while the bundle is still loading.
+    startCommand: >
+      gunicorn --chdir site wsgi:app
+      --bind 0.0.0.0:$PORT
+      --workers 2 --threads 4 --preload
+      --timeout 120 --graceful-timeout 30
+      --access-logfile - --error-logfile -
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: PYTHONUNBUFFERED
+        value: "1"
