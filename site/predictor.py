@@ -76,6 +76,12 @@ class Predictor:
         self.phys = pd.read_parquet(SERVING / "physics.parquet")
         self.phys_idx = {(int(r.pitcher), r.canon): r for r in self.phys.itertuples()}
         self.league_phys = self.smeta["league_physics"]
+        uni = [1.0 / self.n_pitch] * self.n_pitch
+        self.league_pitch = np.array(self.smeta.get("league_pitch_dist") or uni)
+        self.league_whiff = np.array(self.smeta.get("league_whiff_rate")
+                                     or [0.25] * self.n_pitch)
+        self.league_zone = np.array(self.smeta.get("league_zone_dist")
+                                    or [1.0 / len(self.zones)] * len(self.zones))
 
         mt = SERVING / "matchup_table_v5.parquet"
         self.matchup = pd.read_parquet(mt) if mt.exists() else None
@@ -205,26 +211,47 @@ class Predictor:
             float(s.get("pitch_count_game", 1)), 120.0)
         return ctx, names
 
-    def _priors(self, pitcher, batter):
-        prow = self.pit.loc[pitcher] if pitcher in self.pit.index else None
-        brow = self.bat.loc[batter] if batter in self.bat.index else None
-        uni = 1.0 / self.n_pitch
+    def custom_arsenal_vector(self, mix):
+        """A pitch-mix dict {"FF": 55, "SL": 30, ...} -> a prior over the
+        canonical classes. Values are any positive weights; they are
+        normalised, so percentages and raw counts both work."""
+        v = np.zeros(self.n_pitch)
+        for k, w in (mix or {}).items():
+            k = str(k).upper().strip()
+            if k in self.classes and float(w) > 0:
+                v[self.classes.index(k)] = float(w)
+        return v / v.sum() if v.sum() > 0 else self.league_pitch.copy()
 
-        arsenal = np.array([float(prow[f"arsenal_{c}"]) if prow is not None else uni
-                            for c in self.classes])
-        seen = np.array([float(brow[f"seen_{c}"]) if brow is not None else uni
-                         for c in self.classes])
-        whiff = np.array([float(brow[f"whiff_{c}"]) if brow is not None else 0.25
-                          for c in self.classes])
-        zp = np.array([float(prow[f"zoneprior_{z}"]) if prow is not None
-                       else 1.0 / len(self.zones) for z in self.zones])
-        zs = np.array([float(brow[f"zoneseen_{z}"]) if brow is not None
-                       else 1.0 / len(self.zones) for z in self.zones])
+    def _priors(self, pitcher, batter, custom_mix=None):
+        prow = (self.pit.loc[pitcher]
+                if custom_mix is None and pitcher in self.pit.index else None)
+        brow = (self.bat.loc[batter]
+                if batter is not None and batter in self.bat.index else None)
+
+        # League averages, not a uniform distribution: an expanding prior
+        # backs off to exactly these for a player with no history, so
+        # they are what the model was trained to see for an unknown one.
+        if custom_mix is not None:
+            arsenal = self.custom_arsenal_vector(custom_mix)
+        elif prow is not None:
+            arsenal = np.array([float(prow[f"arsenal_{c}"]) for c in self.classes])
+        else:
+            arsenal = self.league_pitch.copy()
+
+        seen = (np.array([float(brow[f"seen_{c}"]) for c in self.classes])
+                if brow is not None else self.league_pitch.copy())
+        whiff = (np.array([float(brow[f"whiff_{c}"]) for c in self.classes])
+                 if brow is not None else self.league_whiff.copy())
+        zp = (np.array([float(prow[f"zoneprior_{z}"]) for z in self.zones])
+              if prow is not None else self.league_zone.copy())
+        zs = (np.array([float(brow[f"zoneseen_{z}"]) for z in self.zones])
+              if brow is not None else self.league_zone.copy())
 
         # Matchup history; with none, fall back to the pitcher's own mix,
         # which is what an expanding prior holds before any meetings.
         fam, mdist = 0.0, arsenal.copy()
-        if self.matchup is not None and (pitcher, batter) in self.matchup.index:
+        if (self.matchup is not None and batter is not None and custom_mix is None
+                and (pitcher, batter) in self.matchup.index):
             row = self.matchup.loc[(pitcher, batter)]
             counts = np.array([float(row.get(c, 0.0)) for c in self.classes])
             if counts.sum() > 0:
@@ -296,9 +323,19 @@ class Predictor:
 
     # ---------- the call ----------
     def predict(self, s):
-        pitcher, batter = int(s["pitcher"]), int(s["batter"])
-        state, names = self._state_block(s)
-        ars, mdist, fam, seen, whiff, zp, zs = self._priors(pitcher, batter)
+        # The batter is optional: the person using this IS the batter, and
+        # is not in an MLB table. Handedness still matters enormously
+        # (platoon splits), so it is asked for separately.
+        pitcher = int(s["pitcher"]) if s.get("pitcher") is not None else -1
+        batter = int(s["batter"]) if s.get("batter") is not None else None
+        # A custom mix lets the tool work for a pitcher who is not in the
+        # data at all — college, high school, a new call-up.
+        custom_mix = s.get("custom_arsenal") or None
+
+        state, names = self._state_block({**s, "pitcher": pitcher,
+                                          "batter": batter if batter is not None else -1})
+        ars, mdist, fam, seen, whiff, zp, zs = self._priors(
+            pitcher, batter, custom_mix)
         ctx = np.concatenate([
             state[0], ars, mdist, [fam], seen, whiff, zp, zs]).astype(np.float64)
         if len(ctx) != len(self.ctx_names):
@@ -320,18 +357,35 @@ class Predictor:
                   f"is probably building one of them differently from "
                   f"02_preprocess.py.")
 
-        prow = self.pit.loc[pitcher] if pitcher in self.pit.index else None
-        mask = np.array([[float(prow[f"mask_{c}"]) if prow is not None else 1.0
-                          for c in self.classes]], np.float32)
+        prow = (self.pit.loc[pitcher]
+                if custom_mix is None and pitcher in self.pit.index else None)
+        if custom_mix is not None:
+            # Only the pitches they told us he throws. This is what makes
+            # a non-MLB pitcher workable at all.
+            m = [1.0 if self.custom_arsenal_vector(custom_mix)[i] > 0 else 0.0
+                 for i in range(self.n_pitch)]
+            mask = np.array([m or [1.0] * self.n_pitch], np.float32)
+        else:
+            mask = np.array([[float(prow[f"mask_{c}"]) if prow is not None else 1.0
+                              for c in self.classes]], np.float32)
 
-        brow = self.bat.loc[batter] if batter in self.bat.index else None
+        brow = (self.bat.loc[batter]
+                if batter is not None and batter in self.bat.index else None)
         # Encoded ids come off the row, never from a separate map — the
         # two keyings drifting apart is how every lookup silently became
         # "unknown player" while the site still returned a confident call.
+        # Index 0 is the unknown bucket the model was TRAINED with (ids
+        # below the appearance threshold map there), so it is a state it
+        # has seen, not an out-of-range lookup.
+        hand_code = {"R": 0, "L": 1, "S": 2}
         pi = np.array([int(prow["enc"]) if prow is not None else 0], np.int32)
         bi = np.array([int(brow["enc"]) if brow is not None else 0], np.int32)
-        ph = np.array([int(prow["hand"]) if prow is not None else 0], np.int32)
-        bh = np.array([int(brow["hand"]) if brow is not None else 0], np.int32)
+        ph = np.array([hand_code.get(str(s.get("pitcher_hand", "")).upper(),
+                                     int(prow["hand"]) if prow is not None else 0)],
+                      np.int32)
+        bh = np.array([hand_code.get(str(s.get("batter_hand", "")).upper(),
+                                     int(brow["hand"]) if brow is not None else 0)],
+                      np.int32)
         park = np.array([s.get("park_id", 0)], np.int32)
         catcher = np.array([s.get("catcher_id", 0)], np.int32)
 
@@ -370,6 +424,7 @@ class Predictor:
             "context_outliers": [n for n, _ in outliers],
             "known_pitcher": prow is not None,
             "known_batter": brow is not None,
+            "custom_arsenal": custom_mix is not None,
             "speaks": conf >= self.threshold,
             "call": "GEAR UP" if gear_up else "STAY BACK",
             "family": "fastball" if gear_up else "offspeed",

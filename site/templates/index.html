@@ -51,6 +51,17 @@
     internet, then rebuild the serving bundle.
   </div>
 
+  <div class="row">
+    <label>Pitcher source
+      <select name="pmode" id="pmode">
+        <option value="mlb">Pick an MLB pitcher</option>
+        <option value="custom">Enter a pitch mix (college / HS / anyone)</option>
+      </select></label>
+    <label>He throws
+      <select name="pitcher_hand"><option>R</option><option>L</option></select></label>
+  </div>
+
+  <div id="mlb-pitcher">
   <label for="pitcher-input">Pitcher</label>
   <div class="combo" data-role="pitcher">
     <input id="pitcher-input" class="combo-input" type="text" role="combobox"
@@ -59,8 +70,20 @@
     <input type="hidden" name="pitcher" class="combo-value">
     <ul id="pitcher-list" class="combo-list" role="listbox" hidden></ul>
   </div>
+  </div>
 
-  <label for="batter-input">Batter</label>
+  <div id="custom-pitcher" hidden>
+    <label>His pitch mix <span class="hint">(rough percentages are fine —
+      only the pitches you list can be predicted)</span></label>
+    <div id="mixrows"></div>
+    <button type="button" id="addmix" class="ghost">+ add a pitch</button>
+  </div>
+
+  <div class="row">
+    <label>Batter <span class="hint">(optional — leave blank if it's you)</span></label>
+    <label style="flex:0 0 7rem">You bat
+      <select name="batter_hand"><option>R</option><option>L</option><option>S</option></select></label>
+  </div>
   <div class="combo" data-role="batter">
     <input id="batter-input" class="combo-input" type="text" role="combobox"
            autocomplete="off" aria-expanded="false" aria-autocomplete="list"
@@ -224,15 +247,33 @@ document.querySelector('.combo[data-role=pitcher]')
 document.getElementById('f').onsubmit = async e => {
   e.preventDefault();
   const out = document.getElementById('out');
+  const custom = document.getElementById('pmode').value === 'custom';
   const pid = combos.pitcher.hidden.value, bid = combos.batter.hidden.value;
-  if (!pid || !bid) {
-    out.innerHTML = '<div class="warn">Pick a pitcher and a batter from the '
-      + 'list — typing a name without selecting it leaves no player chosen.</div>';
+  let mix = null;
+  if (custom) {
+    mix = {};
+    document.querySelectorAll('.mixrow').forEach(r => {
+      const w = parseFloat(r.querySelector('.mw').value);
+      if (w > 0) mix[r.querySelector('.mp').value] = w;
+    });
+    if (!Object.keys(mix).length) {
+      out.innerHTML = '<div class="warn">List at least one pitch he throws.</div>';
+      return;
+    }
+  } else if (!pid) {
+    out.innerHTML = '<div class="warn">Pick a pitcher from the list — typing '
+      + 'a name without selecting it leaves no pitcher chosen.</div>';
     return;
   }
   const f = new FormData(e.target);
   const body = {
-    pitcher: +pid, batter: +bid,
+    // The batter is optional: whoever is using this IS the batter, and is
+    // very unlikely to be in an MLB table. Handedness still goes through.
+    pitcher: custom ? null : +pid,
+    batter: bid ? +bid : null,
+    custom_arsenal: mix,
+    pitcher_hand: f.get('pitcher_hand'),
+    batter_hand: f.get('batter_hand'),
     balls: +f.get('balls'), strikes: +f.get('strikes'), outs: +f.get('outs'),
     inning: +f.get('inning'), pitch_of_ab: +f.get('pitch_of_ab'),
     pitch_count_game: +f.get('pitch_count_game'),
@@ -258,11 +299,23 @@ document.getElementById('f').onsubmit = async e => {
         but you set <strong>${body.balls}-${body.strikes}</strong>. The model
         reads both, so an impossible pair weakens the read. Fix one of
         them.</div>` : '';
-  const unknown = (!d.known_pitcher || !d.known_batter)
-    ? `<div class="warn">No history for this
-        ${!d.known_pitcher ? 'pitcher' : 'batter'} in the training data —
-        the model is falling back to league averages. Treat this read as
-        much weaker than the headline numbers above.</div>` : '';
+  // An unknown BATTER is now the normal case — most people using this
+  // are the batter and are not in an MLB table — so it is only worth
+  // flagging when they picked someone we then failed to find.
+  let unknown = '';
+  if (d.custom_arsenal) {
+    unknown = `<div class="warn">Custom pitch mix: the model does not know
+      this pitcher, only what he throws. It is reading the count, the
+      sequence and that mix — not his tendencies. The accuracy figures
+      above were measured WITH pitcher identity and do not apply here.</div>`;
+  } else if (!d.known_pitcher) {
+    unknown = `<div class="warn">No history for this pitcher — falling back
+      to league averages. Treat this read as much weaker than the numbers
+      above.</div>`;
+  } else if (body.batter !== null && !d.known_batter) {
+    unknown = `<div class="warn">No history for that batter — the batter
+      side of the model is using league averages.</div>`;
+  }
   const dist = d.distribution.map(([p, v]) =>
     `<div class="bar"><span>${p}</span>
        <div class="track"><div style="width:${(v*100).toFixed(1)}%"></div></div>
@@ -283,6 +336,36 @@ document.getElementById('f').onsubmit = async e => {
        </div>
        <h3>Full distribution</h3>${dist}`);
 };
+/* custom pitch mix */
+function mixRow() {
+  return '<div class="mixrow"><select class="mp">'
+    + PITCHES.map(p => `<option>${p}</option>`).join('')
+    + '</select><input class="mw" type="number" min="0" max="100" value="20">'
+    + '<span class="pct">%</span>'
+    + '<button type="button" class="rm" aria-label="remove">&times;</button></div>';
+}
+document.getElementById('addmix').onclick = () =>
+  document.getElementById('mixrows').insertAdjacentHTML('beforeend', mixRow());
+document.getElementById('mixrows').onclick = e => {
+  if (e.target.classList.contains('rm')) e.target.closest('.mixrow').remove();
+};
+document.getElementById('pmode').onchange = e => {
+  const custom = e.target.value === 'custom';
+  document.getElementById('mlb-pitcher').hidden = custom;
+  document.getElementById('custom-pitcher').hidden = !custom;
+  if (custom) {
+    // Only the listed pitches are predictable, so the recent-pitch rows
+    // must offer the same set.
+    arsenal = [...document.querySelectorAll('.mixrow .mp')].map(s => s.value);
+    if (!arsenal.length) { document.getElementById('addmix').click();
+                           document.getElementById('addmix').click(); }
+    refreshRows();
+  }
+};
+document.getElementById('mixrows').addEventListener('change', () => {
+  arsenal = [...document.querySelectorAll('.mixrow .mp')].map(s => s.value);
+  refreshRows();
+});
 document.getElementById('add').click();
 </script>
 </body>
