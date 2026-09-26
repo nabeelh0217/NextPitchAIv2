@@ -252,6 +252,12 @@ document.getElementById('f').onsubmit = async e => {
   } catch (err) { out.innerHTML = `<div class="err">Server unreachable.</div>`; return; }
   if (d.error) { out.innerHTML = `<div class="err"><pre>${d.error}</pre></div>`; return; }
 
+  const mism = d.count_mismatch
+    ? `<div class="warn">The pitches you listed imply a
+        <strong>${d.count_mismatch[0]}-${d.count_mismatch[1]}</strong> count,
+        but you set <strong>${body.balls}-${body.strikes}</strong>. The model
+        reads both, so an impossible pair weakens the read. Fix one of
+        them.</div>` : '';
   const unknown = (!d.known_pitcher || !d.known_batter)
     ? `<div class="warn">No history for this
         ${!d.known_pitcher ? 'pitcher' : 'batter'} in the training data —
@@ -262,7 +268,7 @@ document.getElementById('f').onsubmit = async e => {
        <div class="track"><div style="width:${(v*100).toFixed(1)}%"></div></div>
        <em>${(v*100).toFixed(1)}%</em></div>`).join('');
 
-  out.innerHTML = unknown + (d.speaks
+  out.innerHTML = mism + unknown + (d.speaks
     ? `<div class="verdict ${d.family}">
          <div class="call">${d.call}</div>
          <div class="det">likeliest ${d.family}: <strong>${d.likeliest}</strong>

@@ -41,6 +41,9 @@ PHYS_COLS = ["release_speed", "plate_x", "plate_z",
              "release_spin_rate", "pfx_x", "pfx_z"]
 # Outcome one-hot order, must match OUTCOME_CLASSES in 02_preprocess.py.
 OUTCOMES = ["ball", "called_strike", "whiff", "foul", "in_play"]
+# Beyond this many standard deviations a context feature is almost
+# certainly built wrong rather than merely unusual.
+OUTLIER_SD = 12.0
 
 
 class NotBuilt(RuntimeError):
@@ -103,6 +106,7 @@ class Predictor:
                 f"{w.name} / {a.name} missing — run "
                 f"`python site/export_model.py` (needs TensorFlow, so run it "
                 f"locally, not on the server).")
+        self._warned_outliers = False
         self.model = NumpyModel(w, a)
 
     # ---------- player search ----------
@@ -224,7 +228,12 @@ class Predictor:
             row = self.matchup.loc[(pitcher, batter)]
             counts = np.array([float(row.get(c, 0.0)) for c in self.classes])
             if counts.sum() > 0:
-                mdist, fam = counts / counts.sum(), float(counts.sum())
+                # log1p, matching 02_preprocess.py. Feeding the raw count
+                # put this feature 37 standard deviations out and flattened
+                # every other signal, including the count — the model
+                # returned almost the same distribution on 3-0 as on 0-2.
+                mdist = counts / counts.sum()
+                fam = float(np.log1p(counts.sum()))
         return arsenal, mdist, fam, seen, whiff, zp, zs
 
     def _sequence(self, pitcher, recent):
@@ -260,6 +269,31 @@ class Predictor:
                 [1.0 if p.get("same_ab") else 0.0 for p in take], np.float32)
         return seq
 
+    @staticmethod
+    def implied_count(recent):
+        """The count the same-at-bat pitches imply, or None if unknown.
+
+        A count that contradicts the pitch list is not a harmless typo:
+        the model reads both, and an impossible pair (3-0 with a foul in
+        the at-bat) pushes it toward the middle. On a coherent 3-0 it
+        calls 79% fastball; on an incoherent one, 56%. It degrades
+        quietly, so the caller has to be told.
+        """
+        balls = strikes = 0
+        for pitch in recent:
+            if not pitch.get("same_ab"):
+                continue
+            o = pitch.get("outcome")
+            if o == "ball":
+                balls += 1
+            elif o in ("called_strike", "whiff"):
+                strikes += 1
+            elif o == "foul":
+                strikes = min(strikes + 1, 2)
+            elif o == "in_play":
+                return None          # the at-bat ended; nothing to imply
+        return min(balls, 3), min(strikes, 2)
+
     # ---------- the call ----------
     def predict(self, s):
         pitcher, batter = int(s["pitcher"]), int(s["batter"])
@@ -272,6 +306,19 @@ class Predictor:
                 f"assembled {len(ctx)} context features, model expects "
                 f"{len(self.ctx_names)} — serving bundle is stale.")
         ctx = ((ctx[None, :] - self.ctx_mean) / self.ctx_scale).astype(np.float32)
+        # Shape and order checks cannot catch a feature built in the wrong
+        # UNITS — that is what log1p being missed looked like. A value far
+        # outside the training distribution dominates the first dense
+        # layer and quietly flattens the output, so say so.
+        z = np.abs(ctx[0])
+        outliers = [(self.ctx_names[i], float(ctx[0][i]))
+                    for i in np.flatnonzero(z > OUTLIER_SD)]
+        if outliers and not self._warned_outliers:
+            self._warned_outliers = True
+            print(f"WARNING: context features far outside the training "
+                  f"distribution (|z| > {OUTLIER_SD}): {outliers}. Serving "
+                  f"is probably building one of them differently from "
+                  f"02_preprocess.py.")
 
         prow = self.pit.loc[pitcher] if pitcher in self.pit.index else None
         mask = np.array([[float(prow[f"mask_{c}"]) if prow is not None else 1.0
@@ -312,8 +359,15 @@ class Predictor:
                                         if i not in hard_i]
         best = max(fam_i, key=lambda i: probs[i])
 
+        implied = self.implied_count(s.get("recent", []))
+        given = (int(s.get("balls", 0)), int(s.get("strikes", 0)))
+        mismatch = (list(implied) if implied is not None and implied != given
+                    else None)
+
         order = np.argsort(probs)[::-1]
         return {
+            "count_mismatch": mismatch,
+            "context_outliers": [n for n, _ in outliers],
             "known_pitcher": prow is not None,
             "known_batter": brow is not None,
             "speaks": conf >= self.threshold,
