@@ -94,6 +94,25 @@ Without a blueprint: New → Web Service, Python runtime, build
 `pip install -r site/requirements.txt`, start command copied from
 `render.yaml`, health check path `/healthz`.
 
+## 4b. Which branch Render watches
+
+`render.yaml` sets `autoDeploy: true` but names no branch, so Render
+watches the repo's DEFAULT branch. If your work is on a feature branch,
+nothing deploys and the dashboard looks fine.
+
+Either merge to the default branch, or pick the branch in the Blueprint
+screen, or add `branch: <name>` to `render.yaml`. Merging is better —
+a feature branch as a permanent deploy target is something you will
+forget about.
+
+After that, every push to that branch rebuilds and redeploys. Pushing
+code is all it takes.
+
+**Except for the model.** A push does not retrain anything and does not
+rebuild the bundle. New weights reach Render only if you run
+`build_serving_artifacts.py` locally and commit `site/serving/` — which
+is the whole reason that directory is committed.
+
 ## 5. Custom domain
 
 1. Service → **Settings → Custom Domains → Add**, enter e.g.
