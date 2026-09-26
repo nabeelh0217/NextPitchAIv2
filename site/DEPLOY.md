@@ -6,6 +6,22 @@ includes `data_v5/`, `statcast_raw_v5.parquet` and
 `best_model_v5.keras`. `site/serving/` is committed for exactly this
 reason: it is the only path by which the model reaches production.
 
+## 0. Which machine
+
+Run these wherever `data_v5/` lives. It and `statcast_raw_v5.parquet`
+are gitignored, so a fresh clone on another computer does NOT have them
+— copy them across rather than retraining. Retraining produces a
+different model, which invalidates the numbers in
+`product_claim_v5.json` and the claim the site makes; you would have to
+re-run `analyze_actionability.py` and re-check the ship criterion first.
+
+Commands below use the macOS/Linux venv path. On Windows use
+`.venv\Scripts\python` throughout, e.g.
+
+```
+.venv\Scripts\python site\build_serving_artifacts.py
+```
+
 ## 1. Build the bundle locally
 
 Run these on the machine that has `data_v5/`, in this order. The first
