@@ -155,6 +155,17 @@ the claim instead of leaving a stale boast on the page.
 **The site answers, but the numbers feel wrong after a retrain.** You
 almost certainly skipped step 1 or 3. Rebuild the bundle and commit it.
 
+**Build hangs on `[mutex.cc] RAW: Lock blocking`.** A TensorFlow
+deadlock, seen on macOS: numpy and pandas start Accelerate's thread pool,
+then TF starts its own on top and the two lock up. The weight export
+therefore runs in its own process, which prevents it. If you still hit
+it, run the stages separately:
+
+```bash
+.venv/bin/python site/build_serving_artifacts.py --no-model
+.venv/bin/python site/export_model.py
+```
+
 **First request after idle times out.** That is the free-tier cold start,
 not a bug. `--timeout 120` already allows for it.
 

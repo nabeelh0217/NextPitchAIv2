@@ -19,6 +19,8 @@ live prediction should start from. This is the same rule
 """
 import argparse
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -234,12 +236,28 @@ def main():
     # TensorFlow-free weights for serving. TF is needed here, offline,
     # and never on the server.
     if not NO_MODEL:
-        try:
-            from export_model import export
-            export(DATA_DIR / "best_model_v5.keras", OUT_DIR)
-        except Exception as e:
-            print(f"  WARNING: model export failed ({e}).")
-            print("  Run `python site/export_model.py` before deploying.")
+        # A SUBPROCESS, deliberately. Importing TensorFlow into this
+        # process after pandas and numpy have already started their
+        # thread pools deadlocks on macOS — abseil prints
+        # "[mutex.cc] RAW: Lock blocking" and hangs forever. Keeping TF
+        # in its own process makes that impossible, and means a TF
+        # problem cannot take the rest of the bundle down with it.
+        script = Path(__file__).resolve().parent / "export_model.py"
+        print("\nExporting model weights (separate process; needs TensorFlow)...")
+        r = subprocess.run(
+            [sys.executable, str(script),
+             "--model", str(DATA_DIR / "best_model_v5.keras"),
+             "--out", str(OUT_DIR)],
+            env={**os.environ,
+                 # TF's own thread pools on top of Accelerate's are what
+                 # deadlock; one interop thread avoids the pile-up and
+                 # costs nothing for a single forward pass.
+                 "TF_NUM_INTEROP_THREADS": "1",
+                 "TF_CPP_MIN_LOG_LEVEL": "2",
+                 "OMP_NUM_THREADS": "1"})
+        if r.returncode != 0:
+            print(f"  WARNING: model export failed (exit {r.returncode}).")
+            print(f"  Run `{sys.executable} site/export_model.py` before deploying.")
 
     (OUT_DIR / "serving_meta.json").write_text(json.dumps({
         "split": split_desc,
