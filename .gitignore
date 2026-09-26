@@ -28,3 +28,8 @@ Thumbs.db
 !site/serving/
 !site/serving/**
 site/serving/*.pkl
+
+# Local note that TensorFlow cannot run on THIS machine, so the
+# export stops spawning a verification child that macOS reports as
+# a crash. Machine-specific; never commit it.
+site/.tf-unusable

@@ -632,12 +632,30 @@ def main():
     # calls abort(), which no try/except can catch — so verification runs
     # in a CHILD process. The weights are already written by now, so a
     # child that dies costs the check, not the export.
+    # macOS pops a "Python quit unexpectedly" dialog every time the
+    # verification child aborts. Once we know TF is unusable on this
+    # machine, stop spawning it — the export does not need it, and a
+    # crash dialog on every rebuild trains people to ignore real ones.
+    # NOT inside out_dir: that directory is committed, and a marker
+    # shipped in the repo would silently disable verification for
+    # everyone who clones it. This is a local note about THIS machine.
+    marker = Path(__file__).resolve().parent / ".tf-unusable"
+    if marker.exists() and not args.verify_only:
+        print()
+        print("Verification skipped: TensorFlow was unusable here on a previous")
+        print(f"run ({marker.name}). The export does not need it. Delete that")
+        print("file to try again, or run site/test_numpy_parity.py where TF works.")
+        return
+
     if not args.verify_only:
         r = subprocess.run(
             [sys.executable, os.path.abspath(__file__), "--verify-only",
              "--model", str(args.model), "--out-dir", str(args.out_dir),
              "--tolerance", str(args.tolerance)])
         if r.returncode != 0:
+            marker.write_text(
+                f"TensorFlow could not run here (child exited {r.returncode}).\n"
+                f"Delete this file to retry verification.\n")
             print()
             print("Verification DID NOT RUN — TensorFlow is unusable here "
                   f"(child exited {r.returncode}).")
@@ -667,6 +685,7 @@ def main():
     if worst >= args.tolerance:
         raise SystemExit(f"EXPORT IS WRONG: {worst:.3e} >= {args.tolerance:.0e}")
     print(f"Verified: worst {worst:.3e} < {args.tolerance:.0e}")
+    (Path(__file__).resolve().parent / ".tf-unusable").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
