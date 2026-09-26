@@ -670,3 +670,74 @@ hard/soft call. Run 10 decides:
   test of the capacity-theft hypothesis.
 - type head stays ~47.4% -> the extra season explains the drop, the head
   is exonerated, keep it as a secondary read behind hard/soft.
+
+---
+
+## Run 10 — location head OFF, 4 seasons, random split (2026-09-26)
+
+`03_train.py --split random --no-location-head`. Confirmed genuinely off:
+the report monitors `val_loss`, not `val_output_loss`, and carries no
+location block.
+
+| run | data | head | top-1 | top-3 | log-loss | FB-family |
+|---|---|---|---|---|---|---|
+| 8 | 3 seasons | off | 48.2% | 92.0% | 1.1566 | — |
+| 9a | 4 seasons | on | 47.3% | 91.5% | 1.1755 | 62.7% |
+| 9b | 4 seasons | on | 47.6% | 91.5% | 1.1744 | 62.9% |
+| **10** | 4 seasons | **off** | **47.8%** | 91.4% | **1.1719** | 62.8% |
+
+### What the head costs: ~0.3 points, not 0.9
+
+9a/9b vs 10 is the only clean comparison here — same data, same split,
+same validation rows. Head off is **+0.35 points top-1** (at the ±0.3
+seed-noise floor, so not resolvable) and **-0.0031 nats** (about 3x the
+±0.001 noise, so probably real but small).
+
+**I over-attributed the drop last session.** Run 8 vs run 10 is not a
+valid comparison: run 8's validation set is 20% of three seasons, run
+10's is 20% of four. Different rows, different difficulty. Most of the
+"0.9 point regression" was the test set changing underneath, not the
+head.
+
+### Adding 2025 made the random-split numbers worse
+
+Run 8 -> run 10, config otherwise identical: **-0.4 points top-1, +0.0153
+nats** (15x noise, unambiguous). More data made the measured numbers
+worse, which means the 4-season validation set is harder, not that the
+model got worse. Candidate causes: Statcast reclassification drift (the
+sweeper split out of SL), a richer 2025 pitch mix, more pitchers with
+thin histories. Not worth chasing — the seasons are not comparable test
+sets, so only same-data comparisons mean anything from here on.
+
+### Verdict on the location head
+
+Cost is small and real; benefit is real and thin (1.6% of location
+uncertainty, 5.8% actionable coverage vs the >=10% bar). Decoupling it
+from the shared bottleneck might buy back the 0.003 nats, but it would
+not move the 5.8%, and coverage is what fails the bar. Location is mostly
+execution variance and no architecture fixes that.
+
+**Leave it off. Stop spending runs on it.** Revisit only if the site
+wants a secondary "over the plate / out of the zone" tint, and if so
+temperature-calibrate the zone head first — the coverage figure above is
+uncalibrated, and the type head gained ~3 points of coverage from T=0.8.
+
+Note: run 10 overwrote `best_model_v5.keras`, so the 9b two-head model is
+gone. Re-scoring the zone head now needs a retrain.
+
+### Still open, and now blocking the site
+
+**There is no temporal number.** Every figure quoted so far comes from a
+random split whose validation rows share games and at-bats with training
+rows. The site's headline claim cannot come from that.
+
+Fixed this session so it can be measured safely: `analyze_actionability.py`,
+`build_commit_cards.py` and `diagnose_arsenal.py` all hardcoded the random
+split. Run a temporally-trained model through them and they would have
+scored it on rows it trained on — inflating exactly the number intended
+for the site, with plausible-looking output. All four scoring scripts now
+go through `evaluate_model.load_split()`, which reads `split_v5.json`.
+
+Next: `03_train.py --split temporal --holdout-season 2025
+--no-location-head`, then `analyze_actionability.py`. That number is the
+one the site quotes.

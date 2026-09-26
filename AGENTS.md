@@ -146,37 +146,29 @@ baseline is what you can predict knowing only who is on the mound, so
 features do anything at all**. 10-class top-1 reads lower than the old
 4-bucket numbers; that is expected and not a regression.
 
-## Current status (2026-09-25)
+## Current status (2026-09-26)
 
-- **Runs 9a/9b are logged; read their EXPERIMENTS.md entry before
-  starting another run.** Three things came out of them:
-  1. **9b never ran temporally** — the `SPLIT_MODE` edit did not take, and
-     both runs scored the same random 572,669 rows. There is still no
-     temporal number; the CRITICAL split defect is OPEN. `03_train.py`
-     now writes `data_v5/split_v5.json` and both the banner and the
-     report header print the split, so this cannot recur silently.
-  2. **Seed variance is +-0.3 points top-1 / +-0.001 nats**, measured
-     from 9a vs 9b (same experiment, twice). Any lift smaller than that
-     is noise. Runs 5-8 were compared without knowing this.
-  3. **The location head failed its pre-registered accuracy criterion**
-     (+0.0 vs a constant guess). A new log-loss / heart-vs-rest test is
-     pre-registered in EXPERIMENTS.md; it is a separate test, not a
-     retroactive pass. Accuracy cannot judge a head whose plurality class
-     wins nearly every cell.
-- **Location head re-scored: ALIVE but marginal.** Zone log-loss beats
-  both baselines (+0.0213 league, +0.0191 pitcher, ~20x seed noise), so
-  it learned something real — but it removes only 1.6% of location
-  uncertainty vs the type head's 13%, and heart-vs-rest is actionable on
-  just 5.8% of pitches, under the >=10% product bar. Do not delete, do
-  not ship. See EXPERIMENTS.md.
-- **Run 10 decides the head**: `python 03_train.py --split random
-  --no-location-head` (flags, not file edits), isolating whether the head is what cost
-  the type head 0.9 points (9a/9b changed two things at once). If top-1
-  returns to ~48.2% the head stole capacity — remove it, or rebuild it
-  decoupled off `combined` instead of the shared 64-unit bottleneck `z`.
-  If top-1 stays ~47.4%, the extra season explains the drop and the head
-  is exonerated. The type head is the product; a thin location read never
-  justifies degrading the hard/soft call.
+- **Run 10 is the current model**: 4 seasons, random split, no location
+  head. top-1 47.8%, top-3 91.4%, log-loss 1.1719, FB-family 62.8%.
+- **The location head is OFF and stays off.** It cost ~0.3 points top-1 /
+  0.003 nats and returned a location read actionable on only 5.8% of
+  pitches, under the >=10% bar. Location is mostly execution variance; no
+  architecture change fixes that. Do not spend more runs on it.
+- **Only compare runs on the same data.** Run 8 (3 seasons) vs run 10 (4
+  seasons) is invalid — different validation sets, different difficulty.
+  Adding 2025 moved top-1 -0.4 and log-loss +0.0153 with config otherwise
+  identical, which is the test set changing, not the model regressing.
+- **Seed variance is +-0.3 points top-1 / +-0.001 nats** (9a vs 9b, the
+  same experiment twice). Anything smaller is noise. Runs 5-8 were
+  compared without knowing this.
+- **THE BLOCKER: there is still no temporal number.** Every figure so far
+  comes from a random split whose validation rows share games and at-bats
+  with training rows. The site cannot quote those. Next run:
+  `python 03_train.py --split temporal --holdout-season 2025
+  --no-location-head`, then `python analyze_actionability.py`.
+- All four scoring scripts now route through `evaluate_model.load_split()`.
+  They previously hardcoded the random split, which would have scored a
+  temporally-trained model on its own training rows.
 
 ## Earlier status (2026-09-24)
 

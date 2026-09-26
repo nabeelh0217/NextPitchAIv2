@@ -32,6 +32,43 @@ SPLIT_TEST_SIZE = 0.2
 SPLIT_SEED = 42
 
 
+def load_split(y_labels, data_dir: Path = DATA_DIR):
+    """
+    Reproduce the split the saved model was actually trained with.
+
+    03_train.py records it in split_v5.json. Every script that scores a
+    saved model must come through here — a hardcoded random split applied
+    to a temporally-trained model silently scores it on rows it trained
+    on, which inflates every number downstream and looks entirely
+    plausible in the output.
+
+    Returns (idx_tr, idx_val, split_desc).
+    """
+    split_path = data_dir / "split_v5.json"
+    split = json.loads(split_path.read_text()) if split_path.exists() else {}
+    mode = split.get("mode", "random")
+    idx = np.arange(len(y_labels))
+    if mode == "temporal":
+        seasons = np.load(data_dir / "X_season.npy")
+        holdout = int(split["holdout_season"])
+        idx_tr, idx_val = idx[seasons < holdout], idx[seasons == holdout]
+        desc = f"temporal, validate on {holdout}"
+    else:
+        idx_tr, idx_val = train_test_split(
+            idx, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED,
+            stratify=y_labels)
+        desc = f"random {1 - SPLIT_TEST_SIZE:.0%}/{SPLIT_TEST_SIZE:.0%}, seed {SPLIT_SEED}"
+    if split and len(idx_val) != split.get("n_val", len(idx_val)):
+        raise SystemExit(
+            f"split mismatch: reproduced {len(idx_val):,} val rows but the run "
+            f"recorded {split['n_val']:,}. data_v5/ changed since training — "
+            f"re-run 03_train.py.")
+    if not split:
+        print("WARNING: no split_v5.json — assuming the random split. If this "
+              "model was trained temporally the numbers below are invalid.")
+    return idx_tr, idx_val, desc
+
+
 def _topk_acc(probs, y, k):
     """Fraction of rows whose true class is in the top-k of probs."""
     topk = np.argsort(probs, axis=1)[:, -k:]
@@ -358,30 +395,7 @@ def main():
     }
     y_labels = np.load(DATA_DIR / "y_labels.npy")
 
-    # Reproduce 03_train.py's split. It records what it actually did in
-    # split_v5.json rather than us keeping a second copy of the config in
-    # sync — a duplicated SPLIT_MODE is exactly how a run gets scored on
-    # the wrong rows while the report looks fine.
-    split_path = DATA_DIR / "split_v5.json"
-    split = json.loads(split_path.read_text()) if split_path.exists() else {}
-    mode = split.get("mode", "random")
-    indices = np.arange(len(y_labels))
-    if mode == "temporal":
-        seasons = np.load(DATA_DIR / "X_season.npy")
-        holdout = int(split["holdout_season"])
-        idx_tr = indices[seasons < holdout]
-        idx_val = indices[seasons == holdout]
-        split_desc = f"temporal, validate on {holdout}"
-    else:
-        idx_tr, idx_val = train_test_split(
-            indices, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED,
-            stratify=y_labels)
-        split_desc = f"random {1 - SPLIT_TEST_SIZE:.0%}/{SPLIT_TEST_SIZE:.0%}, seed {SPLIT_SEED}"
-    if split and len(idx_val) != split.get("n_val", len(idx_val)):
-        raise SystemExit(
-            f"split mismatch: reproduced {len(idx_val):,} val rows but the "
-            f"run recorded {split['n_val']:,}. data_v5/ has changed since "
-            f"training — re-run 03_train.py.")
+    idx_tr, idx_val, split_desc = load_split(y_labels)
     print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
 
     model_path = DATA_DIR / "best_model_v5.keras"

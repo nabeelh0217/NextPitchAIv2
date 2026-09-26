@@ -21,12 +21,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from sklearn.model_selection import train_test_split
+from evaluate_model import load_split
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data_v5"
-SPLIT_TEST_SIZE = 0.2
-SPLIT_SEED = 42
 
 
 def hdr(title):
@@ -44,9 +42,8 @@ def main():
     y = np.load(DATA_DIR / "y_labels.npy")
     N = len(y)
 
-    idx = np.arange(N)
-    idx_tr, idx_val = train_test_split(
-        idx, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED, stratify=y)
+    idx_tr, idx_val, split_desc = load_split(y)
+    print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
 
     # Rows share a mask per pitcher; collapse to unique pitchers via the mask
     # bit-pattern so "per pitcher" stats are not weighted by workload.

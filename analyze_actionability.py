@@ -25,7 +25,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from evaluate_model import (
-    DATA_DIR, SPLIT_SEED, SPLIT_TEST_SIZE, FASTBALL_FAMILY,
+    DATA_DIR, SPLIT_SEED, SPLIT_TEST_SIZE, FASTBALL_FAMILY, load_split,
     PRIOR_SMOOTHING, _smoothed, fit_temperature, apply_temperature,
 )
 
@@ -73,9 +73,8 @@ def main():
           "batter_hand", "park_id", "catcher_id", "arsenal_mask"]}
     y = np.load(DATA_DIR / "y_labels.npy")
 
-    idx = np.arange(len(y))
-    idx_tr, idx_val = train_test_split(
-        idx, test_size=SPLIT_TEST_SIZE, random_state=SPLIT_SEED, stratify=y)
+    idx_tr, idx_val, split_desc = load_split(y)
+    print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
 
     print("Loading model and predicting...")
     model = tf.keras.models.load_model(
