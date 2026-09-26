@@ -1,0 +1,13 @@
+{
+  "split": "temporal, validate on 2025",
+  "league_physics": {
+    "release_speed": 90.0,
+    "plate_x": 0.03987696021795273,
+    "plate_z": 2.306854724884033,
+    "release_spin_rate": 2287.0,
+    "pfx_x": -0.18000000715255737,
+    "pfx_z": 0.6399999856948853
+  },
+  "n_pitchers": 1235,
+  "n_batters": 970
+}

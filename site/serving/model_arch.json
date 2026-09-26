@@ -1,0 +1,432 @@
+{
+  "format": "nextpitch-numpy-arch",
+  "version": 1,
+  "source_model": "best_model_v5.keras",
+  "keras_version": "3.15.1",
+  "inputs": [
+    {
+      "name": "seq_input",
+      "alias": "seq",
+      "shape": [
+        null,
+        8,
+        22
+      ],
+      "dtype": "float32"
+    },
+    {
+      "name": "ctx_input",
+      "alias": "ctx",
+      "shape": [
+        null,
+        63
+      ],
+      "dtype": "float32"
+    },
+    {
+      "name": "pitcher_id",
+      "alias": "pitcher_id",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "batter_id",
+      "alias": "batter_id",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "pitcher_hand",
+      "alias": "pitcher_hand",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "batter_hand",
+      "alias": "batter_hand",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "park_id",
+      "alias": "park_id",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "catcher_id",
+      "alias": "catcher_id",
+      "shape": [
+        null,
+        1
+      ],
+      "dtype": "int32"
+    },
+    {
+      "name": "arsenal_mask",
+      "alias": "arsenal_mask",
+      "shape": [
+        null,
+        10
+      ],
+      "dtype": "float32"
+    }
+  ],
+  "outputs": {
+    "output": "output"
+  },
+  "primary_output": "output",
+  "n_params": 428994,
+  "nodes": [
+    {
+      "op": "input",
+      "name": "seq_input"
+    },
+    {
+      "op": "bidirectional_lstm",
+      "name": "bidirectional",
+      "inputs": [
+        "seq_input"
+      ],
+      "merge_mode": "concat",
+      "forward": {
+        "units": 128,
+        "go_backwards": false,
+        "return_sequences": true,
+        "use_bias": true,
+        "activation": "tanh",
+        "recurrent_activation": "sigmoid"
+      },
+      "backward": {
+        "units": 128,
+        "go_backwards": true,
+        "return_sequences": true,
+        "use_bias": true,
+        "activation": "tanh",
+        "recurrent_activation": "sigmoid"
+      }
+    },
+    {
+      "op": "input",
+      "name": "ctx_input"
+    },
+    {
+      "op": "dropout",
+      "name": "dropout",
+      "inputs": [
+        "bidirectional"
+      ]
+    },
+    {
+      "op": "dense",
+      "name": "dense",
+      "inputs": [
+        "ctx_input"
+      ],
+      "use_bias": true,
+      "activation": "relu"
+    },
+    {
+      "op": "input",
+      "name": "pitcher_id"
+    },
+    {
+      "op": "input",
+      "name": "batter_id"
+    },
+    {
+      "op": "input",
+      "name": "pitcher_hand"
+    },
+    {
+      "op": "input",
+      "name": "batter_hand"
+    },
+    {
+      "op": "input",
+      "name": "park_id"
+    },
+    {
+      "op": "input",
+      "name": "catcher_id"
+    },
+    {
+      "op": "bidirectional_lstm",
+      "name": "bidirectional_1",
+      "inputs": [
+        "dropout"
+      ],
+      "merge_mode": "concat",
+      "forward": {
+        "units": 64,
+        "go_backwards": false,
+        "return_sequences": false,
+        "use_bias": true,
+        "activation": "tanh",
+        "recurrent_activation": "sigmoid"
+      },
+      "backward": {
+        "units": 64,
+        "go_backwards": true,
+        "return_sequences": false,
+        "use_bias": true,
+        "activation": "tanh",
+        "recurrent_activation": "sigmoid"
+      }
+    },
+    {
+      "op": "batch_normalization",
+      "name": "batch_normalization",
+      "inputs": [
+        "dense"
+      ],
+      "epsilon": 0.001,
+      "axis": -1,
+      "scale": true,
+      "center": true
+    },
+    {
+      "op": "embedding",
+      "name": "pitcher_id_embedding",
+      "inputs": [
+        "pitcher_id"
+      ],
+      "input_dim": 1236,
+      "output_dim": 32
+    },
+    {
+      "op": "embedding",
+      "name": "batter_id_embedding",
+      "inputs": [
+        "batter_id"
+      ],
+      "input_dim": 971,
+      "output_dim": 16
+    },
+    {
+      "op": "embedding",
+      "name": "pitcher_hand_embedding",
+      "inputs": [
+        "pitcher_hand"
+      ],
+      "input_dim": 2,
+      "output_dim": 4
+    },
+    {
+      "op": "embedding",
+      "name": "batter_hand_embedding",
+      "inputs": [
+        "batter_hand"
+      ],
+      "input_dim": 3,
+      "output_dim": 4
+    },
+    {
+      "op": "embedding",
+      "name": "park_id_embedding",
+      "inputs": [
+        "park_id"
+      ],
+      "input_dim": 31,
+      "output_dim": 4
+    },
+    {
+      "op": "embedding",
+      "name": "catcher_id_embedding",
+      "inputs": [
+        "catcher_id"
+      ],
+      "input_dim": 167,
+      "output_dim": 8
+    },
+    {
+      "op": "dropout",
+      "name": "dropout_1",
+      "inputs": [
+        "bidirectional_1"
+      ]
+    },
+    {
+      "op": "dropout",
+      "name": "dropout_2",
+      "inputs": [
+        "batch_normalization"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten",
+      "inputs": [
+        "pitcher_id_embedding"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten_1",
+      "inputs": [
+        "batter_id_embedding"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten_2",
+      "inputs": [
+        "pitcher_hand_embedding"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten_3",
+      "inputs": [
+        "batter_hand_embedding"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten_4",
+      "inputs": [
+        "park_id_embedding"
+      ]
+    },
+    {
+      "op": "flatten",
+      "name": "flatten_5",
+      "inputs": [
+        "catcher_id_embedding"
+      ]
+    },
+    {
+      "op": "concatenate",
+      "name": "concatenate",
+      "inputs": [
+        "dropout_1",
+        "dropout_2",
+        "flatten",
+        "flatten_1",
+        "flatten_2",
+        "flatten_3",
+        "flatten_4",
+        "flatten_5"
+      ],
+      "axis": -1
+    },
+    {
+      "op": "dense",
+      "name": "dense_1",
+      "inputs": [
+        "concatenate"
+      ],
+      "use_bias": true,
+      "activation": "relu"
+    },
+    {
+      "op": "batch_normalization",
+      "name": "batch_normalization_1",
+      "inputs": [
+        "dense_1"
+      ],
+      "epsilon": 0.001,
+      "axis": -1,
+      "scale": true,
+      "center": true
+    },
+    {
+      "op": "dropout",
+      "name": "dropout_3",
+      "inputs": [
+        "batch_normalization_1"
+      ]
+    },
+    {
+      "op": "dense",
+      "name": "dense_2",
+      "inputs": [
+        "dropout_3"
+      ],
+      "use_bias": true,
+      "activation": "relu"
+    },
+    {
+      "op": "input",
+      "name": "arsenal_mask"
+    },
+    {
+      "op": "dropout",
+      "name": "dropout_4",
+      "inputs": [
+        "dense_2"
+      ]
+    },
+    {
+      "op": "elementwise",
+      "name": "subtract",
+      "fn": "subtract",
+      "args": [
+        {
+          "const": 1.0
+        },
+        {
+          "node": "arsenal_mask"
+        }
+      ]
+    },
+    {
+      "op": "dense",
+      "name": "logits",
+      "inputs": [
+        "dropout_4"
+      ],
+      "use_bias": true,
+      "activation": "linear"
+    },
+    {
+      "op": "elementwise",
+      "name": "multiply",
+      "fn": "multiply",
+      "args": [
+        {
+          "node": "subtract"
+        },
+        {
+          "const": -12.0
+        }
+      ]
+    },
+    {
+      "op": "elementwise",
+      "name": "add",
+      "fn": "add",
+      "args": [
+        {
+          "node": "logits"
+        },
+        {
+          "node": "multiply"
+        }
+      ]
+    },
+    {
+      "op": "activation",
+      "name": "output",
+      "inputs": [
+        "add"
+      ],
+      "activation": "softmax"
+    }
+  ]
+}
