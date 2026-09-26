@@ -1,5 +1,8 @@
 # Large data / model artifacts — never commit these
 *.parquet
+# .bak does not match *.parquet, so an old multi-GB scrape sitting next
+# to the current one would be staged by `git add -A` and pushed.
+*.parquet.bak
 *.npy
 *.keras
 *.pkl
