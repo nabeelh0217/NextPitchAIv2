@@ -1,8 +1,8 @@
 # site/ — the hitter-facing app
 
 ```bash
-python site/build_serving_artifacts.py   # once per retrain
-python site/app.py                       # http://127.0.0.1:5000
+.venv/bin/python site/build_serving_artifacts.py   # once per retrain
+.venv/bin/python site/app.py                       # http://127.0.0.1:5000
 ```
 
 Deploying is **[DEPLOY.md](DEPLOY.md)**. The short version: Render builds

@@ -12,9 +12,9 @@ Run these on the machine that has `data_v5/`, in this order. The first
 two need your training environment; only the third matters for deploy.
 
 ```bash
-python analyze_actionability.py          # writes data_v5/product_claim_v5.json
-python site/player_names.py --from-serving   # MLB names; needs internet
-python site/build_serving_artifacts.py   # bundle + weight export
+.venv/bin/python analyze_actionability.py          # writes data_v5/product_claim_v5.json
+.venv/bin/python site/player_names.py --from-serving   # MLB names; needs internet
+.venv/bin/python site/build_serving_artifacts.py   # bundle + weight export
 ```
 
 `build_serving_artifacts.py` does the name fetch and the weight export
@@ -34,7 +34,7 @@ that, raise `MIN_MATCHUP_MEETINGS` — do not raise the cap.
 ## 2. Check it before you push
 
 ```bash
-python site/app.py          # http://127.0.0.1:5000
+.venv/bin/python site/app.py          # http://127.0.0.1:5000
 ```
 
 Confirm the claim panel shows a coverage figure next to the accuracy
@@ -131,7 +131,7 @@ Check `pip list` in the build log for tensorflow or scikit-learn, and
 that `--workers 2` was not raised.
 
 **Pickers show `Pitcher 605483`.** `player_names.json` is missing or
-empty. Run `python site/player_names.py --from-serving` with internet,
+empty. Run `.venv/bin/python site/player_names.py --from-serving` with internet,
 rebuild, commit. The site works fine this way — it is only cosmetic.
 
 **No claim panel.** `product_claim_v5.json` is not in the bundle. Run

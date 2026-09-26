@@ -99,8 +99,8 @@ editing the file** — two runs in a row were invalidated by an edit that
 never reached the executed copy:
 
 ```bash
-python 03_train.py --split random --no-location-head   # run 10
-python 03_train.py --split temporal --holdout-season 2025
+.venv/bin/python 03_train.py --split random --no-location-head   # run 10
+.venv/bin/python 03_train.py --split temporal --holdout-season 2025
 ```
 
 Needs Python 3.10–3.13 (TensorFlow has no wheels for newer). The runners
@@ -198,8 +198,8 @@ features do anything at all**. 10-class top-1 reads lower than the old
   at-bats between train and validation.
 - The location head is OFF and stays off. Seed variance is +-0.3 points
   top-1 / +-0.001 nats.
-- **`site/` is built.** `python site/build_serving_artifacts.py` then
-  `python site/app.py`. Every figure it shows is read from
+- **`site/` is built.** `.venv/bin/python site/build_serving_artifacts.py` then
+  `.venv/bin/python site/app.py`. Every figure it shows is read from
   `data_v5/product_claim_v5.json`, which `analyze_actionability.py`
   writes from held-out rows — nothing is hardcoded, so a retrain updates
   the site's claim instead of leaving a stale boast in the HTML.
@@ -247,9 +247,9 @@ only path by which the model reaches production.
 The release loop, in order, every time the model changes:
 
 ```bash
-python 03_train.py ...                     # retrain
-python analyze_actionability.py            # writes product_claim_v5.json
-python site/build_serving_artifacts.py     # bundle + names + weight export
+.venv/bin/python 03_train.py ...                     # retrain
+.venv/bin/python analyze_actionability.py            # writes product_claim_v5.json
+.venv/bin/python site/build_serving_artifacts.py     # bundle + names + weight export
 git add site/serving && git commit && git push
 ```
 
