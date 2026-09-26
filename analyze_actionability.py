@@ -38,6 +38,7 @@ COMMIT_THRESHOLDS = (0.60, 0.65, 0.70, 0.75, 0.80)
 # The bar for "this is worth shipping to a hitter", all three required:
 MIN_SHARE = 0.10   # speaks often enough to matter
 MIN_ACC = 0.70     # right often enough to commit the swing
+MIN_COVERAGE = 0.10   # a read on fewer pitches than this is not a product
 MIN_EDGE = 0.02    # and BEATS the scouting report he already has.
 # The edge is the load-bearing one. High accuracy on 3-0 counts is
 # worthless if the base rate already gives it to him for free.
@@ -316,6 +317,10 @@ def main():
         beats_scout = mm - ss > 1.96 * se
         beats_oracle = mm - cc > 1.96 * se
         broad = win_rate > 0.50
+        s5_verdict = ("POSITIVE" if (beats_scout and broad and beats_oracle)
+                      else "NEGATIVE" if mm - ss < -1.96 * se
+                      else "WEAK")
+        s5_lift = mm - ss
         if beats_scout and broad and beats_oracle:
             out("POSITIVE within-situation lift: the model knows things a")
             out("static card cannot carry. Build a LIVE lookup, not a card.")
@@ -347,6 +352,7 @@ def main():
         out("hitter already does.")
     else:
         out(f"No cell had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
+        s5_verdict, s5_lift = "UNMEASURED", 0.0
 
     hdr(out, "6. THE PRODUCT CLAIM — what goes on the site")
     out("Sections 3-5 are model diagnostics. This is the sentence a hitter")
@@ -380,46 +386,60 @@ def main():
         out(f"{t:>10.0%}{sel.mean():>12.1%}{tool:>8.1%}{tab:>8.1%}"
             f"{tool - tab:>+8.1%}")
     out("")
+    s6 = []
+    for t in COMMIT_THRESHOLDS:
+        sel = cal_conf >= t
+        if sel.sum() == 0 or sel.mean() < MIN_COVERAGE:
+            continue
+        s6.append((t, float(sel.mean()),
+                   float((hard_pred[sel] == hard_true[sel]).mean()),
+                   float((scout_lean_row[sel] == hard_true[sel]).mean())))
     out("Read the chosen row as: \"on X% of pitches the tool gives you a")
     out("read; it is right A% of the time, where your scouting table would")
     out("have been right B%.\"")
 
     hdr(out, "VERDICT")
-    if best:
-        t, share, acc, edge = best
-        out(f"ACTIONABLE. At a {t:.0%} commit threshold the model advises on")
-        out(f"{share:.1%} of pitches and is right {acc:.1%} of the time there,")
-        out(f"{edge:+.1%} better than the pitcher's own base rate.")
+    # Gated on the COUNT-SPLIT bar, never on section 3. Section 3 scores
+    # the model against the pitcher's overall mix, which ignores the
+    # count — a bar every hitter already clears from the scouting report.
+    # Keying the verdict to it once printed ACTIONABLE in the same report
+    # where section 5 printed NEGATIVE.
+    s6_best = max(s6, key=lambda r: r[2] - r[3]) if s6 else None
+    if s6_best:
+        t6, cov6, tool6, tab6 = s6_best
+        out(f"When it speaks (>={t6:.0%} confidence): {cov6:.1%} of pitches, "
+            f"{tool6:.1%} right,")
+        out(f"vs {tab6:.1%} for the count-split scouting table — "
+            f"{tool6 - tab6:+.1%}.")
+        out(f"Across ALL situations: {s5_lift:+.1%} vs that same table "
+            f"({s5_verdict}).")
         out("")
-        out("Build the product around this slice: stay silent by default,")
-        out("speak only when the read clears the threshold.")
+    if s5_verdict == "POSITIVE" and s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE:
+        out("ACTIONABLE. The model beats the count-split scouting table both")
+        out("overall and on the slice where it speaks. Build the live lookup.")
+    elif s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE:
+        out("ACTIONABLE AS A SELECTIVE OVERLAY, NOT A REPLACEMENT.")
+        out("Across all situations a constant per-cell rule matches or beats")
+        out("the model, so this cannot be sold as 'better than a scouting")
+        out("report'. But on the pitches where it is confident it does beat")
+        out("that table, and staying silent elsewhere is the design.")
+        out("")
+        out("The claim must be scoped to the slice, and the site must show")
+        out("the coverage number next to the accuracy number. Quoting the")
+        out("accuracy alone would be dishonest.")
     else:
-        # Separate "can't predict" from "predicts fine but adds nothing".
-        m70 = hard_conf >= 0.70
-        if m70.sum():
-            acc70 = (hard_pred[m70] == hard_true[m70]).mean()
-            pacc70 = (prior_hard[m70] == hard_true[m70]).mean()
-            out(f"NOT ACTIONABLE. At a 70% threshold the model speaks on "
-                f"{m70.mean():.1%} of")
-            out(f"pitches at {acc70:.1%} accuracy — but the pitcher's own base "
-                f"rate already")
-            out(f"gets {pacc70:.1%} there, an edge of {acc70 - pacc70:+.1%}.")
-            out("")
-            if acc70 - pacc70 < MIN_EDGE:
-                out("The bottleneck is NOT accuracy — it is that a scouting")
-                out("report already tells the hitter everything the model does.")
-                out("Game context must add something the base rates do not.")
-        else:
-            out("NOT ACTIONABLE — the model is never confident enough to "
-                "commit.")
+        out("NOT ACTIONABLE against the bar that matters. The count-split")
+        out("scouting table is as good or better, both overall and on the")
+        out("confident slice. Game context is not adding what a hitter")
+        out("cannot already read off a table.")
         out("")
         out("Pivot options, in order:")
-        out("  1. Pre-game scouting summaries (count-conditional tendencies)")
-        out("     rather than live per-pitch calls — see section 4 for where")
-        out("     the tendencies are actually sharp.")
-        out("  2. Add previous-pitch OUTCOMES to the sequence (Step 2 of the")
-        out("     plan) and re-check; that signal is currently absent.")
-        out("  3. Add a location head — 'fastball up' is a different swing.")
+        out("  1. Ship the count-split table itself as pre-game scouting —")
+        out("     see section 4 for where the tendencies are actually sharp.")
+        out("  2. Narrow the claim to the confident slice and say so plainly,")
+        out("     if section 6's edge is positive but under the bar.")
+        out("  3. Re-check the arsenal mask is built from training rows only;")
+        out("     a leaky mask flatters the model against the table.")
 
     text = "\n".join(lines)
     print(text)

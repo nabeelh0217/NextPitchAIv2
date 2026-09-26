@@ -36,10 +36,18 @@ obvious metrics misleading:
 advised, >=70% accuracy there, AND >=+2 points over the pitcher's base
 rate. Run it before any further modeling work.
 
-**The gate PASSED (2026-09-23).** At a 65% commit threshold the model
-advises on 31.0% of pitches, is right 75.6% of the time there, and beats
-the pitcher's base rate by +5.2 points. The model is good enough; the
-remaining work is product, not modeling.
+**That 2026-09-23 "gate PASSED" was measured on a random split and is
+withdrawn.** On a temporal split (run 11, hold out 2025) the model does
+NOT beat a count-split scouting table across situations: lift -0.6%, it
+wins in 38% of cells, and it trails the best constant per-cell rule by
+2.8 points. All three pre-registered criteria fail. The conclusion that
+the edge is within-situation was a random-split artifact.
+
+What survives: on the 31% of pitches where it is confident, it is right
+71.0% where the count-split table is right 67.1% — **+3.9 points**. That
+is a selective overlay, not a replacement, and the claim must always be
+stated with its coverage. Run 12 re-measures it without the arsenal-mask
+leak; the number above is optimistic until then.
 
 Two rules that follow, and must not be softened:
 - **A card names the likeliest pitch WITHIN the family it tells the hitter
@@ -118,21 +126,28 @@ Savant directly — it cannot run from sandboxed/proxied environments.
    Never oversample/duplicate rows before `train_test_split`. (v6 has no
    resampling at all — class balance is per-class alpha in the focal
    loss.) Reported metrics are always on the untouched validation split.
-6. **One change per training round, logged.** Runs take an hour+.
+6. **Judge against the count-split table, never the pitcher's overall
+   mix.** The overall mix ignores the count, which every hitter reads off
+   a scouting report. Section 3 of `analyze_actionability.py` uses it and
+   is a diagnostic only; sections 5 and 6 carry the real bar and the
+   final verdict gates on those. Report coverage beside accuracy always —
+   an accuracy figure without the share of pitches it covers is a
+   misleading claim.
+7. **One change per training round, logged.** Runs take an hour+.
    Change one thing, retrain, append the result to
    `docs/EXPERIMENTS.md` with the verdict, then decide the next change.
-7. **A run records the split it actually ran.** `03_train.py` writes
+8. **A run records the split it actually ran.** `03_train.py` writes
    `data_v5/split_v5.json`; `evaluate_model.py` reads it rather than
    keeping its own copy of `SPLIT_MODE`, and refuses to score if the row
    count disagrees. Never duplicate split config across the two files —
    run 9b was scored on the wrong rows for exactly that reason, and the
    report looked completely normal.
-8. **Judge a head on a metric that can move.** Where one class is the
+9. **Judge a head on a metric that can move.** Where one class is the
    plurality in nearly every conditioning cell (the zone head: `shadow`
    at 40.8%), argmax accuracy is pinned to the baseline no matter what
    the head learned. Pre-register log-loss against the same baseline, and
    the binary collapse the user can actually act on, alongside accuracy.
-9. **Atomic artifact writes.** `01_scrape_statcast.py` writes to a `.tmp`
+10. **Atomic artifact writes.** `01_scrape_statcast.py` writes to a `.tmp`
    and `os.replace`s into place; the runners refuse a parquet < 1 MB. A
    corrupt/empty artifact silently reused cost a full re-scrape once.
 
@@ -148,27 +163,37 @@ features do anything at all**. 10-class top-1 reads lower than the old
 
 ## Current status (2026-09-26)
 
-- **Run 10 is the current model**: 4 seasons, random split, no location
-  head. top-1 47.8%, top-3 91.4%, log-loss 1.1719, FB-family 62.8%.
-- **The location head is OFF and stays off.** It cost ~0.3 points top-1 /
-  0.003 nats and returned a location read actionable on only 5.8% of
-  pitches, under the >=10% bar. Location is mostly execution variance; no
-  architecture change fixes that. Do not spend more runs on it.
-- **Only compare runs on the same data.** Run 8 (3 seasons) vs run 10 (4
-  seasons) is invalid — different validation sets, different difficulty.
-  Adding 2025 moved top-1 -0.4 and log-loss +0.0153 with config otherwise
-  identical, which is the test set changing, not the model regressing.
-- **Seed variance is +-0.3 points top-1 / +-0.001 nats** (9a vs 9b, the
-  same experiment twice). Anything smaller is noise. Runs 5-8 were
-  compared without knowing this.
-- **THE BLOCKER: there is still no temporal number.** Every figure so far
-  comes from a random split whose validation rows share games and at-bats
-  with training rows. The site cannot quote those. Next run:
-  `python 03_train.py --split temporal --holdout-season 2025
-  --no-location-head`, then `python analyze_actionability.py`.
-- All four scoring scripts now route through `evaluate_model.load_split()`.
-  They previously hardcoded the random split, which would have scored a
-  temporally-trained model on its own training rows.
+- **Run 11 is the first honest evaluation.** Temporal split, hold out
+  2025, 729,688 validation pitches, no shared games. top-1 43.1%,
+  log-loss 1.3194. Training peaked at epoch 3 of 11 — it overfits to
+  pre-2025 almost at once.
+- **The model does not beat a count-split scouting table overall**
+  (-0.6%, wins 38% of cells, -2.8% to oracle). It DOES beat it by +3.9
+  points on the 31% of pitches where it is confident. Sell the slice,
+  never the average. See run 11 in EXPERIMENTS.md.
+- **Never quote a random-split number again.** Runs 1-10 all share games
+  and at-bats between train and validation. Only same-data, same-split
+  comparisons mean anything.
+- **The arsenal mask leaked the future.** It was built over all rows, so
+  on a temporal split it revealed which pitches each pitcher throws in
+  2025. `03_train.py` now rebuilds it from training rows only and the
+  logit penalty is -12, not -1e9 (~2% of 2025 pitches are a type the
+  pitcher had never thrown; infinite penalty is wrong for an event that
+  happened). Run 11's +3.9 is optimistic until run 12 re-measures it.
+- **NEXT — run 12, pre-registered:** `python 03_train.py --split temporal
+  --holdout-season 2025 --no-location-head` then
+  `python analyze_actionability.py`. If section 6's edge at 65% holds at
+  >= +2.0 points on >= 10% of pitches, build `site/` as a selective
+  overlay. If not, the honest product is the count-split table itself,
+  served directly — no model at serve time.
+- The location head is OFF and stays off (~0.3 points top-1 for a read
+  actionable on 5.8% of pitches). Do not spend more runs on it.
+- Seed variance is +-0.3 points top-1 / +-0.001 nats. Anything smaller is
+  noise.
+- All four scoring scripts route through `evaluate_model.load_split()`.
+  The final VERDICT in `analyze_actionability.py` now gates on the
+  count-split bar (sections 5-6); it used to key off section 3 and once
+  printed ACTIONABLE in the same report where section 5 printed NEGATIVE.
 
 ## Earlier status (2026-09-24)
 

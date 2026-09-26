@@ -741,3 +741,90 @@ go through `evaluate_model.load_split()`, which reads `split_v5.json`.
 Next: `03_train.py --split temporal --holdout-season 2025
 --no-location-head`, then `analyze_actionability.py`. That number is the
 one the site quotes.
+
+---
+
+## Run 11 — TEMPORAL split, hold out 2025 (2026-09-26)
+
+`--split temporal --holdout-season 2025 --no-location-head`.
+729,688 validation pitches, no shared games with training.
+
+top-1 **43.1%**, top-3 87.3%, log-loss **1.3194**, FB-family 60.2%.
+(Random-split run 10 on the same data: 47.8% / 1.1719. Not the same test
+set, so the gap is not a "drop" — it is what removing shared games and
+at-bats costs, which is the honest deployment number.)
+
+**Training peaked at epoch 3 of 11.** Run 10 peaked at 18 of 26. The
+model starts overfitting to pre-2025 almost immediately, which is itself
+evidence that much of what it learns is season-specific.
+
+### The within-situation edge does not survive an honest split
+
+Section 5, against the count-split scout — the only bar that matters:
+
+| | run 8 (random) | run 11 (temporal) |
+|---|---|---|
+| lift vs scout | **+1.1%** | **-0.6%** |
+| cells where model wins | **51%** | **38%** |
+| gap to oracle | **+0.3%** | **-2.8%** |
+
+Run 8 cleared all three pre-registered criteria. Run 11 **fails all
+three**, and the script's own section-5 verdict reads NEGATIVE: "a
+constant per-situation rule beats the model."
+
+**The conclusion that the product must be a live lookup was a
+random-split artifact.** With validation rows sharing games and at-bats
+with training rows, the model could lean on outing-specific patterns.
+Against a season it has never seen, a static count-split table is better
+across situations.
+
+### What does survive: the confident slice
+
+Section 6, on held-out 2025, model-selected slice, both scored against
+the count-split table:
+
+| commit @ | speaks on | tool | table | edge |
+|---|---|---|---|---|
+| 60% | 51.5% | 66.4% | 63.3% | +3.1% |
+| **65%** | **31.1%** | **71.0%** | **67.1%** | **+3.9%** |
+| 70% | 15.5% | 77.9% | 74.2% | +3.7% |
+
+The model is worse than the table on average and better than it where it
+is confident. Those are consistent: confidence is informative about when
+to deviate. A selective overlay is defensible; "better than a scouting
+report" is not.
+
+### Two fixes this run forced
+
+**The final VERDICT was keyed to section 3.** It printed ACTIONABLE
+(+6.8%) in the same report where section 5 printed NEGATIVE, because
+section 3 scores against the pitcher's OVERALL mix — a bar that ignores
+the count and that every hitter already clears. AGENTS.md has said since
+2026-09-23 that the count-split table is the only bar. The verdict now
+gates on sections 5 and 6, reports coverage next to accuracy, and has an
+"ACTIONABLE AS A SELECTIVE OVERLAY, NOT A REPLACEMENT" state.
+
+**The arsenal mask leaks the future.** `02_preprocess.py` builds it over
+every row, so on a temporal split it tells the model which pitches each
+pitcher throws in 2025 — including ones he only added that year. The mask
+zeroes out impossible classes and the scout baseline gets no equivalent,
+so the leak flatters the model in exactly the comparison above.
+`03_train.py` now rebuilds it from training rows only (`--full-arsenal-
+mask` restores the old behaviour). The logit penalty softens from -1e9 to
+-12, because with a training-only mask ~2% of 2025 pitches are a type the
+pitcher had genuinely never thrown, and -1e9 charges those the full
+27.6-nat clip for an event that did happen.
+
+**So the +3.9% above is optimistic.** Run 12 measures it without the leak.
+
+### Run 12
+
+`--split temporal --holdout-season 2025 --no-location-head` on the fixed
+mask, then `analyze_actionability.py`. Pre-registered, so it cannot be
+renegotiated afterwards:
+
+- section 6 edge at 65% stays **>= +2.0 points** on **>= 10%** of pitches
+  -> ship as a selective overlay, claim scoped to the slice, coverage
+  always shown beside accuracy.
+- below that -> the honest product is the count-split table itself, and
+  the site should serve that. It needs no model at serve time.

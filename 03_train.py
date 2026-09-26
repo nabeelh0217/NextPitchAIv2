@@ -118,6 +118,9 @@ HOLDOUT_SEASON = 2025
 ENABLE_LOCATION_HEAD = True
 LOCATION_LOSS_WEIGHT = 0.3
 
+# Logit penalty for pitch types outside the pitcher's arsenal.
+ARSENAL_MASK_PENALTY = -12.0
+
 # The values above are defaults; every one can be overridden on the
 # command line. Two runs in a row were invalidated by a config edit that
 # never reached the file being executed (run 9b went out as a random
@@ -132,6 +135,8 @@ _ap.add_argument("--no-location-head", dest="loc", action="store_false",
                  help="force the attack-zone head OFF")
 _ap.add_argument("--location-weight", type=float, default=LOCATION_LOSS_WEIGHT)
 _ap.add_argument("--epochs", type=int, default=EPOCHS)
+_ap.add_argument("--full-arsenal-mask", action="store_true",
+                 help="build the mask over ALL rows (leaky; reproduces runs 1-11)")
 _args = _ap.parse_args()
 
 SPLIT_MODE = _args.split
@@ -139,6 +144,7 @@ HOLDOUT_SEASON = _args.holdout_season
 ENABLE_LOCATION_HEAD = ENABLE_LOCATION_HEAD if _args.loc is None else _args.loc
 LOCATION_LOSS_WEIGHT = _args.location_weight
 EPOCHS = _args.epochs
+FULL_ARSENAL_MASK = _args.full_arsenal_mask
 
 print("=" * 60)
 print("RUN CONFIG — check this matches what you intended")
@@ -147,6 +153,7 @@ print(f"  split          : {SPLIT_MODE}"
       + (f" (hold out {HOLDOUT_SEASON})" if SPLIT_MODE == "temporal" else ""))
 print(f"  location head  : {'ON  (weight %.2f)' % LOCATION_LOSS_WEIGHT if ENABLE_LOCATION_HEAD else 'OFF'}")
 print(f"  epochs         : {EPOCHS}")
+print(f"  arsenal mask   : {'ALL rows (LEAKY)' if FULL_ARSENAL_MASK else 'training rows only'}")
 print("=" * 60)
 
 # =========================
@@ -218,6 +225,37 @@ with open(DATA_DIR / "split_v5.json", "w") as f:
     json.dump({"mode": SPLIT_MODE, "holdout_season": HOLDOUT_SEASON,
                "n_train": int(len(idx_tr)), "n_val": int(len(idx_val))}, f, indent=2)
 print(f"Split recorded: {SPLIT_DESC}")
+
+# Rebuild the arsenal mask from TRAINING rows only.
+#
+# 02_preprocess.py builds it over every row, which leaks: on a temporal
+# split it tells the model which pitches a pitcher will throw in the
+# held-out season, including ones he only added that year. The mask is a
+# real advantage (it zeroes out impossible classes) and the scout
+# baseline gets no equivalent, so the leak flatters the model in exactly
+# the comparison that decides the product.
+#
+# The split is only known here, so the mask is rebuilt here.
+if not FULL_ARSENAL_MASK:
+    _n_pid = int(X_pitcher_id.max()) + 1
+    _counts = np.zeros((_n_pid, n_pitch), dtype=np.float32)
+    np.add.at(_counts, (X_pitcher_id[idx_tr], y_labels[idx_tr]), 1.0)
+    _tbl = (_counts >= 1).astype(np.float32)
+    # A pitcher with no training rows at all is an unknown: all-ones, per
+    # the inference-time rule. Never leave a row all-zero — that would
+    # push every logit to the floor and the softmax would be meaningless.
+    _tbl[_tbl.sum(1) == 0] = 1.0
+    _new = _tbl[X_pitcher_id]
+    _lost = float(((X_arsenal_mask > 0) & (_new == 0)).sum()) / len(X_arsenal_mask)
+    print(f"Arsenal mask rebuilt from training rows: "
+          f"{X_arsenal_mask.sum(1).mean():.2f} -> {_new.sum(1).mean():.2f} "
+          f"types/pitch ({_lost:.2%} of rows lost a type the leaky mask had)")
+    _unmaskable = float((_new[np.arange(len(y_labels)), y_labels] == 0)[idx_val].mean())
+    print(f"  {_unmaskable:.2%} of validation rows are a type the pitcher "
+          f"never threw in training")
+    X_arsenal_mask = _new
+else:
+    print("Arsenal mask: ALL rows (leaky) — reproducing runs 1-11")
 
 
 def gather(idx):
@@ -338,7 +376,12 @@ z = Dropout(0.2)(z)
 # contribute nothing to the loss. All discrimination happens within the
 # pitcher's actual arsenal.
 logits = Dense(n_pitch, name="logits")(z)
-masked_logits = logits + (1.0 - mask_input) * -1e9
+# Soft, not infinite. With a training-only mask a held-out pitcher can
+# genuinely throw a type he had never thrown before (~2% of 2025 rows),
+# and -1e9 charges those the full 27.6-nat clip. exp(-12) ~ 6e-6 still
+# excludes the class for every practical purpose without pretending the
+# event is impossible.
+masked_logits = logits + (1.0 - mask_input) * ARSENAL_MASK_PENALTY
 output = Activation("softmax", name="output")(masked_logits)
 
 # Second head: where the pitch ends up. Shares the trunk, so the
