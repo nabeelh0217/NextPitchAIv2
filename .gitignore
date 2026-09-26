@@ -19,5 +19,12 @@ Thumbs.db
 .idea/
 # .vscode/ is tracked on purpose: tasks.json + settings.json are the Cursor workflow
 
-# derived from data_v5/, rebuilt per training run
-site/serving/
+# site/serving/ IS committed — Render has no access to data_v5/, so the
+# deployed app can only read what is in the repo. The bundle is small
+# (single-digit MB: pruned matchups, per-player priors, exported weights)
+# and build_serving_artifacts.py refuses to write one over BUNDLE_MAX_MB.
+# The blanket bans above still apply everywhere else, so re-allow the
+# specific extensions inside it. Rebuild it after EVERY retrain.
+!site/serving/
+!site/serving/**
+site/serving/*.pkl

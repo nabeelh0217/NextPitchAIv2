@@ -50,6 +50,32 @@ def arsenal(pitcher):
     return jsonify({"arsenal": p.arsenal(pitcher)})
 
 
+@app.route("/api/players")
+def players():
+    p = get_predictor()
+    if not p:
+        return jsonify({"error": _ERR}), 503
+    role = request.args.get("role", "pitcher")
+    if role not in ("pitcher", "batter"):
+        return jsonify({"error": "role must be pitcher or batter"}), 400
+    try:
+        limit = max(1, min(int(request.args.get("limit", 20)), 100))
+    except ValueError:
+        limit = 20
+    return jsonify({"players": p.players(role, request.args.get("q", ""), limit),
+                    "named": p.names_loaded()})
+
+
+@app.route("/healthz")
+def healthz():
+    """Render's health check. 200 only once the model can actually serve —
+    a process that is up but cannot predict is not healthy."""
+    p = get_predictor()
+    if not p:
+        return jsonify({"status": "unavailable", "error": _ERR}), 503
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/predict", methods=["POST"])
 def predict():
     p = get_predictor()

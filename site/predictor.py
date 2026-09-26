@@ -7,8 +7,9 @@ GEAR UP (fastball family) / STAY BACK (offspeed), or NO READ.
 The single biggest risk here is the serve-time feature vector drifting
 from the one the model trained on. Three defences:
 
-  * the game-state block is built by 02_preprocess.build_context_features,
-    imported, not reimplemented;
+  * the game-state block is built by pitch_features.build_context_features,
+    the same function 02_preprocess.py uses at training time — imported,
+    never reimplemented;
   * the assembled column order is checked against `ctx_feature_names` in
     meta_v5.json, and a mismatch raises rather than predicting quietly;
   * the arsenal mask comes from the table the training run saved.
@@ -20,12 +21,14 @@ thrown but not how hard. Missing timesteps stay zero in SCALED space,
 which is how 02_preprocess pads a pitcher's first pitches of a game.
 """
 import json
-from importlib.machinery import SourceFileLoader
+import sys
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pitch_features import build_context_features  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SERVING = Path(__file__).resolve().parent / "serving"
@@ -58,8 +61,12 @@ class Predictor:
         self.seq_len = self.meta["seq_len"]
         self.n_pitch = len(self.classes)
 
-        self.ctx_scaler = joblib.load(SERVING / "context_scaler_v5.pkl")
-        self.seq_scaler = joblib.load(SERVING / "seq_scaler_v5.pkl")
+        # Plain arrays, not pickled StandardScalers: unpickling one drags
+        # scikit-learn (~100MB) into the deploy image for two vectors of
+        # floats, and the transform is (x - mean) / scale regardless.
+        sc = np.load(SERVING / "scalers.npz")
+        self.ctx_mean, self.ctx_scale = sc["ctx_mean"], sc["ctx_scale"]
+        self.seq_mean, self.seq_scale = sc["seq_mean"], sc["seq_scale"]
         self.pit = pd.read_parquet(SERVING / "pitchers.parquet").set_index("pitcher_id")
         self.bat = pd.read_parquet(SERVING / "batters.parquet").set_index("batter_id")
         self.phys = pd.read_parquet(SERVING / "physics.parquet")
@@ -71,9 +78,6 @@ class Predictor:
         if self.matchup is not None:
             self.matchup = self.matchup.set_index(["pitcher", "batter"])
 
-        self.pre = SourceFileLoader(
-            "nextpitch_pre", str(BASE_DIR / "02_preprocess.py")).load_module()
-
         # The claim the site is allowed to make, straight from the gate.
         claim_path = DATA_DIR / "product_claim_v5.json"
         self.claim = (json.loads(claim_path.read_text())
@@ -84,6 +88,55 @@ class Predictor:
 
         self.model = tf.keras.models.load_model(
             DATA_DIR / "best_model_v5.keras", compile=False)
+
+    # ---------- player search ----------
+    def _index(self, table, role):
+        """(id, name, hand, n_pitches) rows, commonest first."""
+        try:
+            from player_names import resolve
+            names = resolve([int(i) for i in table.index],
+                            SERVING / "player_names.json")
+        except Exception:
+            names = {}
+        label = "Pitcher" if role == "pitcher" else "Batter"
+        rows = []
+        for pid_, r in table.iterrows():
+            info = names.get(str(int(pid_))) or {}
+            rows.append({
+                "id": int(pid_),
+                # Falling back to the id keeps the picker usable before
+                # anyone has run the name fetch; it never renders blank.
+                "name": info.get("name") or f"{label} {int(pid_)}",
+                "named": bool(info.get("name")),
+                "hand": info.get("hand") or (
+                    "R" if int(r.get("hand", 0)) == 0 else "L"),
+                "n": int(r.get("n_pitches", 0)),
+            })
+        rows.sort(key=lambda d: -d["n"])
+        return rows
+
+    def players(self, role="pitcher", q="", limit=20):
+        if not hasattr(self, "_pidx"):
+            self._pidx = {"pitcher": self._index(self.pit, "pitcher"),
+                          "batter": self._index(self.bat, "batter")}
+        rows = self._pidx.get(role, [])
+        q = (q or "").strip().lower()
+        if q:
+            # Prefix hits first: typing "deg" should surface deGrom above
+            # someone merely containing the letters.
+            starts = [r for r in rows if r["name"].lower().startswith(q)]
+            subs = [r for r in rows
+                    if q in r["name"].lower() and r not in starts]
+            rows = starts + subs
+        return rows[:limit]
+
+    def names_loaded(self):
+        """True only if real names are actually resolving. The cache file
+        merely existing is not enough — an empty or stale one still leaves
+        the picker showing numeric ids, and the UI prompts on this."""
+        if not hasattr(self, "_pidx"):
+            self.players("pitcher", "", 1)
+        return any(r["named"] for r in self._pidx.get("pitcher", [])[:50])
 
     # ---------- lookups ----------
     def pitcher_ids(self):
@@ -118,7 +171,7 @@ class Predictor:
             "n_thruorder_pitcher": float(s.get("times_through_order", 1)),
             "pitcher_days_since_prev_game": float(s.get("days_rest", 5)),
         }])
-        ctx, names = self.pre.build_context_features(df)
+        ctx, names = build_context_features(df)
         if names != self.ctx_names[:len(names)]:
             raise RuntimeError(
                 "game-state feature names no longer match meta_v5.json; "
@@ -173,8 +226,9 @@ class Predictor:
                     v = self.league_phys.get(col, 0.0)
                 feats[i, cont_start + j] = float(v)
         if recent:
-            feats[:len(recent), cont_start:] = self.seq_scaler.transform(
-                feats[:len(recent), cont_start:])
+            feats[:len(recent), cont_start:] = (
+                (feats[:len(recent), cont_start:] - self.seq_mean)
+                / self.seq_scale)
 
         seq = np.zeros((1, self.seq_len, feats.shape[1] + 1), np.float32)
         take = recent[-self.seq_len:] if recent else []
@@ -198,7 +252,7 @@ class Predictor:
             raise RuntimeError(
                 f"assembled {len(ctx)} context features, model expects "
                 f"{len(self.ctx_names)} — serving bundle is stale.")
-        ctx = self.ctx_scaler.transform(ctx[None, :]).astype(np.float32)
+        ctx = ((ctx[None, :] - self.ctx_mean) / self.ctx_scale).astype(np.float32)
 
         prow = self.pit.loc[pitcher] if pitcher in self.pit.index else None
         mask = np.array([[float(prow[f"mask_{c}"]) if prow is not None else 1.0
