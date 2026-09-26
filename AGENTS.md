@@ -43,11 +43,11 @@ wins in 38% of cells, and it trails the best constant per-cell rule by
 2.8 points. All three pre-registered criteria fail. The conclusion that
 the edge is within-situation was a random-split artifact.
 
-What survives: on the 31% of pitches where it is confident, it is right
-71.0% where the count-split table is right 67.1% — **+3.9 points**. That
-is a selective overlay, not a replacement, and the claim must always be
-stated with its coverage. Run 12 re-measures it without the arsenal-mask
-leak; the number above is optimistic until then.
+What survives (run 12, honest mask, the shipping number): on the **35%**
+of pitches where it is confident, it is right **72.5%** where the
+count-split table is right **68.3%** — **+4.2 points**. That is a
+selective overlay, not a replacement, and the claim must always be
+stated with its coverage.
 
 Two rules that follow, and must not be softened:
 - **A card names the likeliest pitch WITHIN the family it tells the hitter
@@ -117,11 +117,16 @@ Savant directly — it cannot run from sandboxed/proxied environments.
    same-at-bat flag. The outcome is safe only because `build_sequences`
    slices strictly before the current index — the outcome of the pitch
    being predicted would leak its type directly. Never widen the slice.
-4. **Arsenal mask semantics.** `X_arsenal_mask` is 1 for every pitch type
-   the pitcher threw ≥1 time in the full dataset. It is a model INPUT;
-   `03_train.py` adds `(1 - mask) * -1e9` to the logits before softmax.
-   Every training label is unmasked by construction. Unknown pitchers at
-   inference get an all-ones mask.
+4. **Arsenal mask is built from TRAINING rows only.** `02_preprocess.py`
+   still emits a full-data mask; `03_train.py` rebuilds it from `idx_tr`
+   and that is the one used. A full-data mask leaks the future on a
+   temporal split — it reveals pitches a pitcher only added in the
+   held-out season. The logit penalty is `ARSENAL_MASK_PENALTY = -12`,
+   not -1e9: ~2.4% of held-out pitches are a type the pitcher had never
+   thrown, and infinite penalty is wrong for an event that happened.
+   Pitchers with no training rows get an all-ones mask, as do unknown
+   pitchers at inference. Never leave a row all-zero — every logit would
+   hit the floor and the softmax would be meaningless.
 5. **Split before any resampling; evaluate on the natural distribution.**
    Never oversample/duplicate rows before `train_test_split`. (v6 has no
    resampling at all — class balance is per-class alpha in the focal
@@ -163,37 +168,28 @@ features do anything at all**. 10-class top-1 reads lower than the old
 
 ## Current status (2026-09-26)
 
-- **Run 11 is the first honest evaluation.** Temporal split, hold out
-  2025, 729,688 validation pitches, no shared games. top-1 43.1%,
-  log-loss 1.3194. Training peaked at epoch 3 of 11 — it overfits to
-  pre-2025 almost at once.
-- **The model does not beat a count-split scouting table overall**
-  (-0.6%, wins 38% of cells, -2.8% to oracle). It DOES beat it by +3.9
-  points on the 31% of pitches where it is confident. Sell the slice,
-  never the average. See run 11 in EXPERIMENTS.md.
-- **Never quote a random-split number again.** Runs 1-10 all share games
-  and at-bats between train and validation. Only same-data, same-split
-  comparisons mean anything.
-- **The arsenal mask leaked the future.** It was built over all rows, so
-  on a temporal split it revealed which pitches each pitcher throws in
-  2025. `03_train.py` now rebuilds it from training rows only and the
-  logit penalty is -12, not -1e9 (~2% of 2025 pitches are a type the
-  pitcher had never thrown; infinite penalty is wrong for an event that
-  happened). Run 11's +3.9 is optimistic until run 12 re-measures it.
-- **NEXT — run 12, pre-registered:** `python 03_train.py --split temporal
-  --holdout-season 2025 --no-location-head` then
-  `python analyze_actionability.py`. If section 6's edge at 65% holds at
-  >= +2.0 points on >= 10% of pitches, build `site/` as a selective
-  overlay. If not, the honest product is the count-split table itself,
-  served directly — no model at serve time.
-- The location head is OFF and stays off (~0.3 points top-1 for a read
-  actionable on 5.8% of pitches). Do not spend more runs on it.
-- Seed variance is +-0.3 points top-1 / +-0.001 nats. Anything smaller is
-  noise.
-- All four scoring scripts route through `evaluate_model.load_split()`.
-  The final VERDICT in `analyze_actionability.py` now gates on the
-  count-split bar (sections 5-6); it used to key off section 3 and once
-  printed ACTIONABLE in the same report where section 5 printed NEGATIVE.
+- **Run 12 is the shipping model.** Temporal split (hold out 2025),
+  no location head, honest training-only arsenal mask. top-1 43.2%,
+  log-loss 1.5765.
+- **The pre-registered ship criterion was met**: section 6 edge +4.2
+  points on 35.2% of pitches (needed >= +2.0 on >= 10%).
+- **The product claim, exactly:** "On 35% of pitches the tool gives you a
+  read. It is right 72.5% of the time; your count-split scouting table
+  would be right 68.3%." Coverage ALWAYS beside accuracy.
+- **It is a selective overlay, NOT a replacement for a scouting report.**
+  Section 5 is still not broad: +0.7% aggregate but the model beats the
+  table in only 43% of cells. Never claim "better than a scouting
+  report".
+- **Do not quote section 3's +8.3%.** It scores against the pitcher's
+  overall mix, which ignores the count. Diagnostic only.
+- Log-loss lift over the smoothed baseline is only **+0.0435** now. On
+  full-distribution terms the model is barely better than a smoothed
+  pitcher prior; its value is concentrated in the confident slice.
+- **Never quote a random-split number.** Runs 1-10 share games and
+  at-bats between train and validation.
+- The location head is OFF and stays off. Seed variance is +-0.3 points
+  top-1 / +-0.001 nats.
+- **NEXT: build `site/`** around the selective-overlay framing.
 
 ## Earlier status (2026-09-24)
 

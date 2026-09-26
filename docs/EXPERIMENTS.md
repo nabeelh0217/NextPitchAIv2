@@ -828,3 +828,64 @@ renegotiated afterwards:
   always shown beside accuracy.
 - below that -> the honest product is the count-split table itself, and
   the site should serve that. It needs no model at serve time.
+
+---
+
+## Run 12 — temporal, honest arsenal mask (2026-09-26) — SHIP
+
+`--split temporal --holdout-season 2025 --no-location-head`, mask built
+from training rows only, logit penalty -12.
+
+| | run 11 (leaky mask) | run 12 (honest mask) |
+|---|---|---|
+| top-1 | 43.1% | 43.2% |
+| log-loss | 1.3194 | **1.5765** |
+| log-loss lift vs smoothed | +0.3007 | **+0.0435** |
+| section 5 lift vs scout | -0.6% | **+0.7%** |
+| cells won | 38% | **43%** |
+| gap to oracle | -2.8% | **-1.4%** |
+| section 6 @65% | +3.9% on 31.1% | **+4.2% on 35.2%** |
+
+### PRE-REGISTERED CRITERION MET
+
+Required >= +2.0 points on >= 10% of pitches. Delivered **+4.2 points on
+35.2%**. Build `site/` as a selective overlay.
+
+### Why removing a leak made the numbers better
+
+Counterintuitive, so worth stating plainly. Two things changed together
+(a violation of one-change-per-run — the net is clear but attribution is
+not):
+
+1. **Train-only mask** — strictly less information.
+2. **Penalty -1e9 -> -12** — the model can hedge when the mask is wrong.
+
+Log-loss got **worse** (1.3194 -> 1.5765), and that is the honest cost
+showing up: 2.371% of 2025 pitches are a type the pitcher never threw
+before, and at ~12 nats each that is ~0.28 nats — almost exactly the
+0.257 observed. Against the fair smoothed baseline the log-loss lift
+collapses from +0.3007 to **+0.0435**, so on full-distribution terms the
+model is now barely better than a smoothed pitcher prior. That is the
+truthful picture; run 11's looked better because the mask was telling it
+the future.
+
+Top-1 and every actionability metric improved because the hard mask had
+taught the model to trust a signal that will not exist at serve time.
+With a soft penalty it learns to hedge, and its confidence becomes more
+honest — calibration temperature moved 0.975 -> 0.875 and coverage at
+the 65% threshold rose 31.1% -> 35.2%.
+
+### The claim, and its limits
+
+- **Section 5 is still NOT BROAD**: +0.7% aggregate lift, but the model
+  beats the count-split table in only 43% of cells. It is not a
+  replacement for a scouting report and must never be sold as one.
+- **Section 6 is the product**: on 35.2% of pitches it speaks, it is
+  right 72.5% where the table is right 68.3%.
+- Coverage must appear beside accuracy everywhere on the site. "72.5%
+  accurate" alone is a misleading claim.
+- Sections 1-4 use the pitcher's overall mix and are diagnostics only.
+  The +8.3% in section 3 is NOT the product number.
+
+Model shipped to the site: run 12, temporal split, no location head,
+honest mask.
