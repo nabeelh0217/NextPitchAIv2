@@ -263,9 +263,17 @@ clean subprocesses: TensorFlow loading the model is **663 MB** RSS, the
 whole serving stack is **128 MB**. Render's free tier is 512 MB.
 TensorFlow is needed ONLY for the offline `export_model.py` step.
 
-- `export_model.py` re-checks NumPy-vs-Keras parity and refuses to write
-  weights differing by more than 1e-4, so a broken export fails at build
-  time rather than in production.
+- `export_model.py` reads the `.keras` archive directly (zipfile + h5py)
+  and needs NO TensorFlow. TF is used only for the optional parity
+  cross-check, which runs in a CHILD process — a broken TF install calls
+  abort(), which no try/except can catch, and that would otherwise take
+  the export down after the weights were already written. Verified
+  bit-identical to the TF path: all 34 arrays equal, same arch JSON.
+- The h5 weight groups are keyed by Keras's AUTO-GENERATED names, not the
+  layer names in config.json (`logits` is stored under `dense_3`).
+  `vars/@name` records the true name — index by that. Matching
+  positionally would load real weights into the wrong layer and still
+  produce a model that runs.
 - Nothing in the serving path may import tensorflow, keras, torch or
   scikit-learn. `site/requirements.txt` is the contract; adding one of
   them silently reintroduces the OOM.

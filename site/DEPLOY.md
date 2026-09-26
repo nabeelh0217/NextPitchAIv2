@@ -171,6 +171,15 @@ the claim instead of leaving a stale boast on the page.
 **The site answers, but the numbers feel wrong after a retrain.** You
 almost certainly skipped step 1 or 3. Rebuild the bundle and commit it.
 
+**`mutex lock failed` / `libc++abi: terminating` during export.** A
+broken TensorFlow install. It no longer matters: reading a `.keras` file
+needs only `zipfile` and `h5py`, so the export runs without TensorFlow
+and the weights are written regardless. You will see "Verification DID
+NOT RUN" — that is the Keras-vs-NumPy cross-check being skipped, not the
+export failing. Check `site/serving/model_weights.npz` exists and carry
+on; run `site/test_numpy_parity.py` wherever TF works if you want the
+check.
+
 **Build hangs on `[mutex.cc] RAW: Lock blocking`.** A TensorFlow
 deadlock, seen on macOS: numpy and pandas start Accelerate's thread pool,
 then TF starts its own on top and the two lock up. The weight export
