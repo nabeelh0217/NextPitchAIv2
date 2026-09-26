@@ -271,8 +271,29 @@ def main():
             print(f"  WARNING: model export failed (exit {r.returncode}).")
             print(f"  Run `{sys.executable} site/export_model.py` before deploying.")
 
+    # League averages, for a batter or pitcher we know nothing about.
+    # An expanding prior falls back to exactly these on a player's first
+    # pitch, so they are what the model was trained to see for an unknown
+    # one — not a uniform distribution, which it has never seen.
+    league_pitch = (np.bincount(y, minlength=n_pitch) / len(y)).tolist()
+    zpath = DATA_DIR / "y_zone.npy"
+    if zpath.exists():
+        yz = np.load(zpath)
+        yz = yz[yz >= 0]
+        league_zone = (np.bincount(yz, minlength=len(zones)) / max(len(yz), 1)).tolist()
+    else:
+        league_zone = [1.0 / len(zones)] * len(zones)
+    lpath = DATA_DIR / "league_stats_v5.json"
+    league_whiff = [0.25] * n_pitch
+    if lpath.exists():
+        lw = json.loads(lpath.read_text()).get("league_whiff_rate", {})
+        league_whiff = [float(lw.get(c, 0.25)) for c in classes]
+
     (OUT_DIR / "serving_meta.json").write_text(json.dumps({
         "split": split_desc,
+        "league_pitch_dist": league_pitch,
+        "league_zone_dist": league_zone,
+        "league_whiff_rate": league_whiff,
         "league_physics": league,
         "n_pitchers": int(len(pit)),
         "n_batters": int(len(bat)),

@@ -67,6 +67,7 @@ Two rules that follow, and must not be softened:
 | `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining). `03_train.py` imports its `build_report` so the two can't drift |
 | `analyze_actionability.py` | **The product gate.** Confidence stratification, calibration, and the commit-slice edge over the pitcher's base rate. No retraining. Run this before any modeling change |
 | `build_commit_cards.py` | **The product.** Mines per-pitcher, per-count "sit hard / sit soft" rules from held-out predictions. Every rule must beat the COUNT-SPLIT scouting report, not just the pitcher's overall mix |
+| `diagnose_unknown_pitcher.py` | **Gates the custom-arsenal mode.** Ablates the pitcher embedding to index 0 on held-out rows and re-scores against the count-split table, answering what the tool is worth for a pitcher it does not know |
 | `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |
@@ -207,6 +208,20 @@ features do anything at all**. 10-class top-1 reads lower than the old
   Render builds from the repo and cannot see `data_v5/`. Rebuild AND
   commit it after EVERY training run, or the app serves the previous
   model's lookups against the new weights.
+- **The batter is optional.** Whoever uses this IS the batter and is not
+  in an MLB table, so an absent batter falls back to LEAGUE averages (not
+  uniform — an expanding prior backs off to the league on a player's
+  first pitch, so that is the state the model was trained to see).
+  Handedness is still asked for; platoon splits are large.
+- **Custom arsenal mode** lets a hand-entered pitch mix stand in for a
+  pitcher who is not in the data (college, high school, a call-up). The
+  embedding goes to index 0 — the unknown-pitcher bucket the model was
+  TRAINED with — and the mask comes from the listed pitches.
+  **Its accuracy is UNMEASURED and the +4.2 point claim does NOT apply
+  to it**: that was measured with pitcher identity, which this mode
+  discards, and identity is the largest single signal in the model. Run
+  `diagnose_unknown_pitcher.py` before attaching any number to it. The
+  page already says so on every custom-mix prediction.
 - Serving tables are keyed by **raw MLB id** with the encoded embedding
   row in an `enc` column. Mixing the two makes every lookup miss
   silently and fall back to league averages while the site still returns
