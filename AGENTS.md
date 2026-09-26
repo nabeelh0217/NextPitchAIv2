@@ -69,7 +69,9 @@ Two rules that follow, and must not be softened:
 | `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |
-| `site/` | **The product.** Flask app serving the selective overlay. `build_serving_artifacts.py` (run per retrain) -> `predictor.py` -> `app.py` |
+| `pitch_features.py` | **Shared feature vocabulary.** Pitch/outcome/zone classes and every pure feature builder. Imported by BOTH `02_preprocess.py` and the site so training and serving cannot drift. numpy + pandas ONLY — keep it that way |
+| `site/` | **The product.** Flask app serving the selective overlay. `build_serving_artifacts.py` -> `export_model.py` -> `predictor.py` -> `app.py` |
+| `site/numpy_model.py` | TensorFlow-free inference. `export_model.py` converts the Keras graph to `model_weights.npz` and verifies parity before writing |
 | `.cursor/rules/` | Cursor-scoped rules (point back here) |
 
 `data_v5/` and `*.parquet` are gitignored (GBs). The `_v5` file naming is
@@ -227,6 +229,43 @@ features do anything at all**. 10-class top-1 reads lower than the old
   EXPERIMENTS.md and are measurement-hygiene, not blockers.
 - The location head exists and the scrape now covers `zone`, `sz_top`,
   `sz_bot` plus the 2025 season.
+
+## Deployment (Render, public repo)
+
+**Render builds from the GitHub repo and nothing else.** `data_v5/`, the
+raw parquet and `best_model_v5.keras` are all gitignored, so none of them
+exist on the server. `site/serving/` is therefore COMMITTED — it is the
+only path by which the model reaches production.
+
+The release loop, in order, every time the model changes:
+
+```bash
+python 03_train.py ...                     # retrain
+python analyze_actionability.py            # writes product_claim_v5.json
+python site/build_serving_artifacts.py     # bundle + names + weight export
+git add site/serving && git commit && git push
+```
+
+**Skipping the rebuild is the dangerous failure.** The app would serve the
+previous model's priors and arsenals against the new weights and return
+confident, plausible, wrong calls. The bundle carries no version stamp
+that would catch it, so the discipline is the safeguard.
+
+Serving is TensorFlow-free by necessity, not preference. Measured in
+clean subprocesses: TensorFlow loading the model is **663 MB** RSS, the
+whole serving stack is **128 MB**. Render's free tier is 512 MB.
+TensorFlow is needed ONLY for the offline `export_model.py` step.
+
+- `export_model.py` re-checks NumPy-vs-Keras parity and refuses to write
+  weights differing by more than 1e-4, so a broken export fails at build
+  time rather than in production.
+- Nothing in the serving path may import tensorflow, keras, torch or
+  scikit-learn. `site/requirements.txt` is the contract; adding one of
+  them silently reintroduces the OOM.
+- The bundle is capped at `BUNDLE_MAX_MB` (40). If a rebuild trips it,
+  raise `MIN_MATCHUP_MEETINGS` rather than the cap.
+- The free tier sleeps after ~15 min idle and cold-starts in 30-60s.
+  A paid instance removes that; pricing changes, so check it.
 
 ## Conventions
 
