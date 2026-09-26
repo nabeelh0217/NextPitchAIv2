@@ -444,6 +444,30 @@ def main():
     text = "\n".join(lines)
     print(text)
     REPORT_PATH.write_text(text + "\n")
+
+    # The site reads these rather than carrying hand-copied figures, so
+    # a stale or flattering number cannot survive a retrain. Every entry
+    # is measured on the held-out rows of the split the model was
+    # actually trained with.
+    claim = {
+        "split": split_desc,
+        "temperature": float(temp),
+        "n_val": int(len(yv)),
+        "section5_lift_vs_scout": float(s5_lift),
+        "section5_verdict": s5_verdict,
+        "slice": [
+            {"threshold": t, "coverage": cov, "tool_accuracy": tool,
+             "table_accuracy": tab, "edge": tool - tab}
+            for (t, cov, tool, tab) in s6
+        ],
+        "recommended": (
+            {"threshold": s6_best[0], "coverage": s6_best[1],
+             "tool_accuracy": s6_best[2], "table_accuracy": s6_best[3],
+             "edge": s6_best[2] - s6_best[3]} if s6_best else None),
+        "shippable": bool(s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE),
+    }
+    (DATA_DIR / "product_claim_v5.json").write_text(json.dumps(claim, indent=2))
+    print(f"\nProduct claim written to {DATA_DIR / 'product_claim_v5.json'}")
     print(f"\nWritten to {REPORT_PATH}")
 
 

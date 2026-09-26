@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NextPitchAI — hitter's read</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <h1>NextPitchAI</h1>
+  <p class="sub">One call: gear up, or stay back.</p>
+</header>
+
+{% if error %}
+<div class="panel err"><strong>Not ready.</strong><pre>{{ error }}</pre></div>
+{% else %}
+
+{% if claim and claim.recommended %}
+<div class="panel claim">
+  <h2>What this tool actually does</h2>
+  <p class="big">
+    On <strong>{{ '%.0f'|format(claim.recommended.coverage * 100) }}%</strong>
+    of pitches it gives you a read. It is right
+    <strong>{{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}%</strong>
+    of the time there. A count-split scouting report would be right
+    <strong>{{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}%</strong>
+    on those same pitches.
+  </p>
+  <p class="edge">Edge: +{{ '%.1f'|format(claim.recommended.edge * 100) }} points
+     &middot; it says nothing on the other
+     {{ '%.0f'|format(100 - claim.recommended.coverage * 100) }}%.</p>
+  <p class="caveat">
+    Measured on {{ '{:,}'.format(claim.n_val) }} pitches from a season the
+    model never trained on ({{ claim.split }}).
+    <strong>This is an overlay, not a replacement for a scouting report.</strong>
+    Across all situations a fixed per-count rule is as good or better
+    ({{ '%+.1f'|format(claim.section5_lift_vs_scout * 100) }} points).
+    Its value is knowing <em>when</em> to deviate.
+  </p>
+</div>
+{% endif %}
+
+<div class="grid">
+<form id="f" class="panel">
+  <h2>Situation</h2>
+  <label>Pitcher
+    <select name="pitcher" id="pitcher">
+      {% for p in pitchers %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    </select></label>
+  <label>Batter
+    <select name="batter">
+      {% for b in batters %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+    </select></label>
+  <div class="row">
+    <label>Balls <select name="balls">{% for i in range(4) %}<option>{{ i }}</option>{% endfor %}</select></label>
+    <label>Strikes <select name="strikes">{% for i in range(3) %}<option>{{ i }}</option>{% endfor %}</select></label>
+    <label>Outs <select name="outs">{% for i in range(3) %}<option>{{ i }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="row">
+    <label>Inning <select name="inning">{% for i in range(1,10) %}<option>{{ i }}</option>{% endfor %}</select></label>
+    <label>Pitch # in AB <input type="number" name="pitch_of_ab" value="1" min="1" max="15"></label>
+    <label>Pitch count <input type="number" name="pitch_count_game" value="40" min="1" max="120"></label>
+  </div>
+  <div class="row checks">
+    <label><input type="checkbox" name="on_1b"> 1B</label>
+    <label><input type="checkbox" name="on_2b"> 2B</label>
+    <label><input type="checkbox" name="on_3b"> 3B</label>
+  </div>
+
+  <h3>Last few pitches <span class="hint">(most recent last — this is
+      where most of the edge comes from)</span></h3>
+  <div id="recent"></div>
+  <button type="button" id="add" class="ghost">+ add a pitch</button>
+  <button type="submit" class="go">Get the read</button>
+</form>
+
+<div class="panel" id="out"><p class="muted">Set the situation and ask.</p></div>
+</div>
+{% endif %}
+
+<script>
+const PITCHES = {{ pitches|tojson }};
+const OUTCOMES = {{ outcomes|tojson }};
+let arsenal = PITCHES;
+
+async function loadArsenal() {
+  const r = await fetch('/api/arsenal/' + document.getElementById('pitcher').value);
+  if (r.ok) { arsenal = (await r.json()).arsenal; refreshRows(); }
+}
+function rowHtml() {
+  return '<div class="prow">'
+    + '<select class="pt">' + arsenal.map(p => `<option>${p}</option>`).join('') + '</select>'
+    + '<select class="oc">' + OUTCOMES.map(o => `<option>${o}</option>`).join('') + '</select>'
+    + '<label class="sa"><input type="checkbox" class="ab" checked> same AB</label>'
+    + '<button type="button" class="rm">&times;</button></div>';
+}
+function refreshRows() {
+  document.querySelectorAll('.prow .pt').forEach(sel => {
+    const v = sel.value;
+    sel.innerHTML = arsenal.map(p => `<option>${p}</option>`).join('');
+    if (arsenal.includes(v)) sel.value = v;
+  });
+}
+document.getElementById('add').onclick = () =>
+  document.getElementById('recent').insertAdjacentHTML('beforeend', rowHtml());
+document.getElementById('recent').onclick = e => {
+  if (e.target.classList.contains('rm')) e.target.closest('.prow').remove();
+};
+document.getElementById('pitcher').onchange = loadArsenal;
+
+document.getElementById('f').onsubmit = async e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const body = {
+    pitcher: +f.get('pitcher'), batter: +f.get('batter'),
+    balls: +f.get('balls'), strikes: +f.get('strikes'), outs: +f.get('outs'),
+    inning: +f.get('inning'), pitch_of_ab: +f.get('pitch_of_ab'),
+    pitch_count_game: +f.get('pitch_count_game'),
+    on_1b: f.has('on_1b'), on_2b: f.has('on_2b'), on_3b: f.has('on_3b'),
+    recent: [...document.querySelectorAll('.prow')].map(r => ({
+      pitch: r.querySelector('.pt').value,
+      outcome: r.querySelector('.oc').value,
+      same_ab: r.querySelector('.ab').checked }))
+  };
+  const out = document.getElementById('out');
+  out.innerHTML = '<p class="muted">Thinking…</p>';
+  const res = await fetch('/api/predict', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)});
+  const d = await res.json();
+  if (d.error) { out.innerHTML = `<div class="err"><pre>${d.error}</pre></div>`; return; }
+
+  const unknown = (!d.known_pitcher || !d.known_batter)
+    ? `<div class="warn">No history for this
+        ${!d.known_pitcher ? 'pitcher' : 'batter'} in the training data —
+        the model is falling back to league averages. Treat this read as
+        much weaker than the headline numbers above.</div>` : '';
+  const dist = d.distribution.map(([p, v]) =>
+    `<div class="bar"><span>${p}</span>
+       <div class="track"><div style="width:${(v*100).toFixed(1)}%"></div></div>
+       <em>${(v*100).toFixed(1)}%</em></div>`).join('');
+
+  out.innerHTML = unknown + (d.speaks
+    ? `<div class="verdict ${d.family}">
+         <div class="call">${d.call}</div>
+         <div class="det">likeliest ${d.family}: <strong>${d.likeliest}</strong>
+              &middot; ${(d.confidence*100).toFixed(0)}% confident</div>
+       </div>
+       <h3>Full distribution</h3>${dist}`
+    : `<div class="verdict silent">
+         <div class="call">NO READ</div>
+         <div class="det">${(d.confidence*100).toFixed(0)}% confidence,
+              below the ${(d.threshold*100).toFixed(0)}% bar. Trust your
+              own read here — a wrong commit costs more than no advice.</div>
+       </div>
+       <h3>Full distribution</h3>${dist}`);
+};
+document.getElementById('add').click();
+loadArsenal();
+</script>
+</body>
+</html>

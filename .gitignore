@@ -18,3 +18,6 @@ venv/
 Thumbs.db
 .idea/
 # .vscode/ is tracked on purpose: tasks.json + settings.json are the Cursor workflow
+
+# derived from data_v5/, rebuilt per training run
+site/serving/

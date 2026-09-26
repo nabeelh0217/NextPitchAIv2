@@ -32,6 +32,28 @@ SPLIT_TEST_SIZE = 0.2
 SPLIT_SEED = 42
 
 
+def build_arsenal_mask(pitcher_ids, labels, idx_tr, n_pitch):
+    """
+    The arsenal mask, built from TRAINING rows only.
+
+    02_preprocess.py emits a full-data mask, which leaks on a temporal
+    split: it reveals pitch types a pitcher only started throwing in the
+    held-out season. 03_train.py and the serving bundle both call this so
+    the model is served the same mask it was trained with.
+
+    A pitcher with no training rows gets all ones — an unknown arsenal,
+    same as an unseen pitcher at inference. A row must never be all
+    zeros: every logit would hit the floor and the softmax would be
+    meaningless.
+    """
+    n_pid = int(pitcher_ids.max()) + 1
+    counts = np.zeros((n_pid, n_pitch), dtype=np.float32)
+    np.add.at(counts, (pitcher_ids[idx_tr], labels[idx_tr]), 1.0)
+    tbl = (counts >= 1).astype(np.float32)
+    tbl[tbl.sum(1) == 0] = 1.0
+    return tbl
+
+
 def load_split(y_labels, data_dir: Path = DATA_DIR):
     """
     Reproduce the split the saved model was actually trained with.

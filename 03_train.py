@@ -50,7 +50,8 @@ from tensorflow.keras.callbacks import (
 )
 from tensorflow.keras import backend as K
 
-from evaluate_model import build_report, build_location_report, write_report
+from evaluate_model import (build_report, build_location_report,
+                            build_arsenal_mask, write_report)
 
 # =========================
 # Config
@@ -237,14 +238,7 @@ print(f"Split recorded: {SPLIT_DESC}")
 #
 # The split is only known here, so the mask is rebuilt here.
 if not FULL_ARSENAL_MASK:
-    _n_pid = int(X_pitcher_id.max()) + 1
-    _counts = np.zeros((_n_pid, n_pitch), dtype=np.float32)
-    np.add.at(_counts, (X_pitcher_id[idx_tr], y_labels[idx_tr]), 1.0)
-    _tbl = (_counts >= 1).astype(np.float32)
-    # A pitcher with no training rows at all is an unknown: all-ones, per
-    # the inference-time rule. Never leave a row all-zero — that would
-    # push every logit to the floor and the softmax would be meaningless.
-    _tbl[_tbl.sum(1) == 0] = 1.0
+    _tbl = build_arsenal_mask(X_pitcher_id, y_labels, idx_tr, n_pitch)
     _new = _tbl[X_pitcher_id]
     _lost = float(((X_arsenal_mask > 0) & (_new == 0)).sum()) / len(X_arsenal_mask)
     print(f"Arsenal mask rebuilt from training rows: "
@@ -254,6 +248,7 @@ if not FULL_ARSENAL_MASK:
     print(f"  {_unmaskable:.2%} of validation rows are a type the pitcher "
           f"never threw in training")
     X_arsenal_mask = _new
+    np.save(DATA_DIR / "arsenal_mask_table_v5.npy", _tbl)
 else:
     print("Arsenal mask: ALL rows (leaky) — reproducing runs 1-11")
 

@@ -69,6 +69,7 @@ Two rules that follow, and must not be softened:
 | `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
 | `run_pipeline.sh` / `run_pipeline.bat` | One-command runners (macOS/Linux, Windows). Skip completed steps; validate artifacts |
 | `docs/EXPERIMENTS.md` | Every training run, its numbers, and its verdict. **Append a row after every run.** |
+| `site/` | **The product.** Flask app serving the selective overlay. `build_serving_artifacts.py` (run per retrain) -> `predictor.py` -> `app.py` |
 | `.cursor/rules/` | Cursor-scoped rules (point back here) |
 
 `data_v5/` and `*.parquet` are gitignored (GBs). The `_v5` file naming is
@@ -189,7 +190,18 @@ features do anything at all**. 10-class top-1 reads lower than the old
   at-bats between train and validation.
 - The location head is OFF and stays off. Seed variance is +-0.3 points
   top-1 / +-0.001 nats.
-- **NEXT: build `site/`** around the selective-overlay framing.
+- **`site/` is built.** `python site/build_serving_artifacts.py` then
+  `python site/app.py`. Every figure it shows is read from
+  `data_v5/product_claim_v5.json`, which `analyze_actionability.py`
+  writes from held-out rows — nothing is hardcoded, so a retrain updates
+  the site's claim instead of leaving a stale boast in the HTML.
+- **Serving-bundle rule:** `site/serving/` is derived and gitignored.
+  Rebuild it after EVERY training run or the app serves the previous
+  model's lookups against the new model.
+- Serving tables are keyed by **raw MLB id** with the encoded embedding
+  row in an `enc` column. Mixing the two makes every lookup miss
+  silently and fall back to league averages while the site still returns
+  confident calls. `known_pitcher`/`known_batter` in the API flag it.
 
 ## Earlier status (2026-09-24)
 
