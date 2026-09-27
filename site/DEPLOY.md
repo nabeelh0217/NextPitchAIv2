@@ -115,14 +115,53 @@ is the whole reason that directory is committed.
 
 ## 5. Custom domain
 
-1. Service → **Settings → Custom Domains → Add**, enter e.g.
-   `nextpitch.example.com`.
-2. Render shows the DNS record to create at your registrar:
-   - subdomain → `CNAME` to `<service>.onrender.com`
-   - apex/root → the `A` record Render gives you (most registrars cannot
-     CNAME an apex; some offer ALIAS/ANAME, which also works)
-3. Wait for propagation (minutes to a few hours). Render issues a TLS
-   certificate automatically once it resolves — do not buy one.
+Add the domain in Render FIRST — DNS cannot verify against a domain the
+service does not know about.
+
+Service → **Settings → Custom Domains → Add Custom Domain**. Add both
+the apex (`yourdomain.com`) and `www.yourdomain.com`. Render then shows
+the records to create: an **A record value** for the apex and a **CNAME
+target** for www.
+
+**Use the values Render displays.** Their IPs change, and a stale one
+copied from a tutorial fails silently — the domain simply never
+resolves and nothing explains why.
+
+### At the registrar (GoDaddy shown; others differ only in menus)
+
+My Products → the domain → **DNS → Manage Zones**.
+
+| Type | Name | Value | TTL |
+|---|---|---|---|
+| A | `@` | the IP Render showed | 600 |
+| CNAME | `www` | `<service>.onrender.com` | 600 |
+
+Two GoDaddy-specific traps, both of which produce a site that half
+works or does not load at all:
+
+- **Edit the existing `@` A record, do not add a second one.** GoDaddy
+  ships a parking A record on `@`. Two A records make DNS round-robin
+  between Render and the parking page, so the site loads intermittently
+  and looks like a Render problem. Same for the `www` CNAME, which
+  usually already exists pointing at `@`.
+- **Delete any Domain Forwarding.** It is often on by default and
+  overrides DNS entirely, so the domain never reaches Render no matter
+  how correct the records are.
+
+TTL 600 while setting up: the 1-hour default makes every mistake take an
+hour to correct.
+
+### Verify
+
+```bash
+dig +short yourdomain.com          # Render's IP
+dig +short www.yourdomain.com      # <service>.onrender.com
+```
+
+Once those resolve, Render marks the domain Verified and issues TLS
+itself — minutes, occasionally an hour. Do not buy a certificate. If it
+sits on "Verifying" beyond that, it is almost always one of the two
+traps above.
 
 ## Know this about the free tier
 
