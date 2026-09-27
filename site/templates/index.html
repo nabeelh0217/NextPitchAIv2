@@ -235,13 +235,48 @@ function refreshRows() {
     if (arsenal.includes(v)) sel.value = v;
   });
 }
-document.getElementById('add').onclick = () =>
+document.getElementById('add').onclick = () => {
   document.getElementById('recent').insertAdjacentHTML('beforeend', rowHtml());
-document.getElementById('recent').onclick = e => {
-  if (e.target.classList.contains('rm')) e.target.closest('.prow').remove();
+  syncCount();
 };
+document.getElementById('recent').onclick = e => {
+  if (e.target.classList.contains('rm')) { e.target.closest('.prow').remove(); syncCount(); }
+};
+document.getElementById('recent').addEventListener('change', syncCount);
+
+/* The count and the pitch list describe the same at-bat, so the page
+   should not let them disagree and then complain about it. Listing
+   pitches sets the count; the selects stay editable for anyone who
+   wants to describe a situation without listing what came before. */
+function syncCount() {
+  let b = 0, s = 0, ended = false;
+  document.querySelectorAll('.prow').forEach(r => {
+    if (!r.querySelector('.ab').checked) return;
+    const o = r.querySelector('.oc').value;
+    if (o === 'ball') b++;
+    else if (o === 'called_strike' || o === 'whiff') s++;
+    else if (o === 'foul') s = Math.min(s + 1, 2);
+    else if (o === 'in_play') ended = true;
+  });
+  if (ended) return;
+  setSelect('balls', String(Math.min(b, 3)));
+  setSelect('strikes', String(Math.min(s, 2)));
+}
 document.querySelector('.combo[data-role=pitcher]')
-  .addEventListener('picked', e => loadArsenal(e.detail.id));
+  .addEventListener('picked', e => {
+    loadArsenal(e.detail.id);
+    // The API knows which way he throws; making the user restate it is
+    // both friction and a chance to get it wrong.
+    if (e.detail.hand) setSelect('pitcher_hand', e.detail.hand);
+  });
+document.querySelector('.combo[data-role=batter]')
+  .addEventListener('picked', e => {
+    if (e.detail.hand) setSelect('batter_hand', e.detail.hand);
+  });
+function setSelect(name, value) {
+  const el = document.querySelector(`[name="${name}"]`);
+  if (el && [...el.options].some(o => o.value === value)) el.value = value;
+}
 
 /* ---------- predict ---------- */
 document.getElementById('f').onsubmit = async e => {
@@ -360,8 +395,11 @@ document.getElementById('pmode').onchange = e => {
     // Only the listed pitches are predictable, so the recent-pitch rows
     // must offer the same set.
     arsenal = [...document.querySelectorAll('.mixrow .mp')].map(s => s.value);
-    if (!arsenal.length) { document.getElementById('addmix').click();
-                           document.getElementById('addmix').click(); }
+    if (!document.querySelectorAll('.mixrow').length) {
+      document.getElementById('addmix').click();
+      document.getElementById('addmix').click();
+    }
+    arsenal = [...document.querySelectorAll('.mixrow .mp')].map(x => x.value);
     refreshRows();
   }
 };
@@ -369,7 +407,6 @@ document.getElementById('mixrows').addEventListener('change', () => {
   arsenal = [...document.querySelectorAll('.mixrow .mp')].map(s => s.value);
   refreshRows();
 });
-document.getElementById('add').click();
 </script>
 </body>
 </html>
