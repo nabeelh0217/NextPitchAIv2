@@ -52,6 +52,11 @@ PITCH_TYPE_CANON = {
 # Human names for the canonical classes. Lives here, with the classes
 # themselves, so the site and any future report share one spelling
 # instead of each keeping a copy that drifts.
+# The hard/soft split the whole product is built on. Here, not in
+# evaluate_model.py, because the website needs it and evaluate_model
+# imports scikit-learn — which the serving path must never pull in.
+FASTBALL_FAMILY = {"FF", "SI", "FC"}
+
 PITCH_NAMES = {
     "FF": "Four-Seam Fastball",
     "SI": "Sinker",
@@ -88,6 +93,15 @@ WHIFF_DESCRIPTIONS = {
 # pitch being predicted — the outcome of the current pitch would leak
 # its type directly.
 OUTCOME_CLASSES = ["ball", "called_strike", "whiff", "foul", "in_play"]
+# Readable labels for the same classes. The keys are the wire format and
+# must not change; only these strings are for humans.
+OUTCOME_NAMES = {
+    "ball": "Ball",
+    "called_strike": "Called strike",
+    "whiff": "Swing and miss",
+    "foul": "Foul",
+    "in_play": "Put in play",
+}
 N_OUTCOME = len(OUTCOME_CLASSES)
 OUTCOME_OF = {}
 for _d in ("ball", "blocked_ball", "pitchout", "hit_by_pitch"):

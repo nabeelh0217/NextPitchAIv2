@@ -4,9 +4,34 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NextPitchAI — hitter's read</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23f5f8fc'/%3E%3Cpath d='M6 6a16 16 0 0 1 0 20M26 6a16 16 0 0 0 0 20' stroke='%23e8493a' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+<svg class="field" viewBox="0 0 1200 560" fill="none" aria-hidden="true"
+     xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="chalk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cfe3f7" stop-opacity=".16"/>
+      <stop offset="100%" stop-color="#cfe3f7" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="turf" cx="50%" cy="100%" r="72%">
+      <stop offset="0%" stop-color="#2f7a52" stop-opacity=".20"/>
+      <stop offset="100%" stop-color="#2f7a52" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- outfield arc and foul lines, from home plate at the bottom centre -->
+  <path d="M600 545 L110 120 M600 545 L1090 120" stroke="url(#chalk)" stroke-width="2"/>
+  <path d="M150 150 A 620 620 0 0 1 1050 150" stroke="url(#chalk)" stroke-width="2"/>
+  <ellipse cx="600" cy="560" rx="560" ry="300" fill="url(#turf)"/>
+  <!-- the infield diamond -->
+  <path d="M600 545 L742 403 L600 261 L458 403 Z" stroke="url(#chalk)"
+        stroke-width="2" fill="none"/>
+  <circle cx="600" cy="403" r="40" stroke="url(#chalk)" stroke-width="2"/>
+</svg>
 <header>
   <h1>NextPitchAI</h1>
   <p class="sub">One call: gear up, or stay back.</p>
@@ -80,16 +105,20 @@
   </div>
 
   <div class="row">
-    <label>Batter <span class="hint">(optional — leave blank if it's you)</span></label>
-    <label style="flex:0 0 7rem">You bat
-      <select name="batter_hand"><option>R</option><option>L</option><option>S</option></select></label>
-  </div>
-  <div class="combo" data-role="batter">
-    <input id="batter-input" class="combo-input" type="text" role="combobox"
-           autocomplete="off" aria-expanded="false" aria-autocomplete="list"
-           aria-controls="batter-list" placeholder="Type a name…">
-    <input type="hidden" name="batter" class="combo-value">
-    <ul id="batter-list" class="combo-list" role="listbox" hidden></ul>
+    <div style="flex:1">
+      <label for="batter-input">Batter
+        <span class="hint">(optional — leave blank if it's you)</span></label>
+      <div class="combo" data-role="batter">
+        <input id="batter-input" class="combo-input" type="text" role="combobox"
+               autocomplete="off" aria-expanded="false" aria-autocomplete="list"
+               aria-controls="batter-list" placeholder="Type a name…">
+        <input type="hidden" name="batter" class="combo-value">
+        <ul id="batter-list" class="combo-list" role="listbox" hidden></ul>
+      </div>
+    </div>
+    <label style="flex:0 0 6.5rem">You bat
+      <select name="batter_hand"><option>R</option><option>L</option><option>S</option></select>
+    </label>
   </div>
 
   <div class="row">
@@ -122,6 +151,8 @@
 <script>
 const PITCHES = {{ pitches|tojson }};
 const PNAME = {{ pitch_names|tojson }};
+const HARD = {{ hard_family|tojson }};
+const ONAME = {{ outcome_names|tojson }};
 const pname = c => PNAME[c] || c;
 const plabel = c => `${c} — ${pname(c)}`;
 const OUTCOMES = {{ outcomes|tojson }};
@@ -228,7 +259,8 @@ function rowHtml() {
   return '<div class="prow">'
     + '<select class="pt">' + arsenal.map(p =>
         `<option value="${p}">${plabel(p)}</option>`).join('') + '</select>'
-    + '<select class="oc">' + OUTCOMES.map(o => `<option>${o}</option>`).join('') + '</select>'
+    + '<select class="oc">' + OUTCOMES.map(o =>
+        `<option value="${o}">${ONAME[o] || o}</option>`).join('') + '</select>'
     + '<label class="sa"><input type="checkbox" class="ab" checked> same AB</label>'
     + '<button type="button" class="rm" aria-label="remove">&times;</button></div>';
 }
@@ -359,9 +391,12 @@ document.getElementById('f').onsubmit = async e => {
     unknown = `<div class="warn">No history for that batter — the batter
       side of the model is using league averages.</div>`;
   }
-  const dist = d.distribution.map(([p, v]) =>
-    `<div class="bar"><span title="${p}">${pname(p)}</span>
-       <div class="track"><div style="width:${(v*100).toFixed(1)}%"></div></div>
+  const dist = d.distribution.map(([p, v], i) =>
+    `<div class="bar ${HARD.includes(p) ? 'hard' : 'soft'}"
+          style="animation-delay:${60 + i * 55}ms">
+       <span title="${p}">${pname(p)}</span>
+       <div class="track"><div data-w="${(v*100).toFixed(1)}"
+            style="--w:${(v*100).toFixed(1)}%"></div></div>
        <em>${(v*100).toFixed(1)}%</em></div>`).join('');
 
   out.innerHTML = mism + unknown + (d.speaks
@@ -379,6 +414,14 @@ document.getElementById('f').onsubmit = async e => {
               own read here — a wrong commit costs more than no advice.</div>
        </div>
        <h3>Full distribution</h3>${dist}`);
+
+  // Next frame, so the transition has a zero to start from.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    out.querySelectorAll('.track div').forEach((el, i) => {
+      el.style.transitionDelay = `${120 + i * 55}ms`;
+      el.style.width = el.dataset.w + '%';
+    });
+  }));
 };
 /* custom pitch mix */
 function mixRow() {

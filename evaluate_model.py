@@ -121,7 +121,9 @@ def _pitcher_prior_table(pid_tr, y_tr, n_classes, n_pitchers):
 # Fastball family, for the literature-comparable binary collapse. Most
 # published next-pitch numbers are fastball-vs-rest, NOT 10-class, so the
 # 10-class top-1 cannot be compared to them directly.
-FASTBALL_FAMILY = {"FF", "SI", "FC"}
+# Defined in pitch_features so the site can use it without
+# importing this module, which pulls in scikit-learn.
+from pitch_features import FASTBALL_FAMILY  # noqa: E402,F401
 
 # Pseudo-counts for the smoothed baseline, matching ARSENAL_SMOOTHING in
 # 02_preprocess.py. The model's own arsenal_prior feature is smoothed this

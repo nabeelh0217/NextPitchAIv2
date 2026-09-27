@@ -11,10 +11,15 @@ is read from data_v5/product_claim_v5.json, written by
 analyze_actionability.py on held-out rows — the app never hardcodes a
 number, so it cannot keep quoting a figure a retrain invalidated.
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from flask import Flask, jsonify, render_template, request
 
 from predictor import NotBuilt, Predictor
-from pitch_features import PITCH_NAMES
+from pitch_features import FASTBALL_FAMILY, OUTCOME_NAMES, PITCH_NAMES
 
 app = Flask(__name__)
 _P = None
@@ -41,7 +46,9 @@ def index():
         claim=p.claim if p else None,
         outcomes=["ball", "called_strike", "whiff", "foul", "in_play"],
         pitches=p.classes if p else [],
-        pitch_names=PITCH_NAMES)
+        pitch_names=PITCH_NAMES,
+        hard_family=sorted(FASTBALL_FAMILY),
+        outcome_names=OUTCOME_NAMES)
 
 
 @app.route("/api/arsenal/<int:pitcher>")
