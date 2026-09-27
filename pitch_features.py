@@ -49,6 +49,22 @@ PITCH_TYPE_CANON = {
     "KN": "KN",   # knuckleball
 }
 
+# Human names for the canonical classes. Lives here, with the classes
+# themselves, so the site and any future report share one spelling
+# instead of each keeping a copy that drifts.
+PITCH_NAMES = {
+    "FF": "Four-Seam Fastball",
+    "SI": "Sinker",
+    "FC": "Cutter",
+    "SL": "Slider",
+    "ST": "Sweeper",
+    "CU": "Curveball",
+    "KC": "Knuckle Curve",
+    "CH": "Changeup",
+    "FS": "Splitter",
+    "KN": "Knuckleball",
+}
+
 PITCH_CLASSES = sorted(set(PITCH_TYPE_CANON.values()))  # alphabetical
 PITCH_TO_ID = {p: i for i, p in enumerate(PITCH_CLASSES)}
 N_PITCH = len(PITCH_CLASSES)

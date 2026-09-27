@@ -14,6 +14,7 @@ number, so it cannot keep quoting a figure a retrain invalidated.
 from flask import Flask, jsonify, render_template, request
 
 from predictor import NotBuilt, Predictor
+from pitch_features import PITCH_NAMES
 
 app = Flask(__name__)
 _P = None
@@ -39,7 +40,8 @@ def index():
         batters=p.batter_ids()[:800] if p else [],
         claim=p.claim if p else None,
         outcomes=["ball", "called_strike", "whiff", "foul", "in_play"],
-        pitches=p.classes if p else [])
+        pitches=p.classes if p else [],
+        pitch_names=PITCH_NAMES)
 
 
 @app.route("/api/arsenal/<int:pitcher>")

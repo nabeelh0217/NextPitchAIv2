@@ -44,7 +44,8 @@ button { cursor:pointer; border-radius:8px; font-size:14px; padding:9px 14px; }
 .verdict.offspeed { border-color:var(--soft); } .offspeed .call { color:var(--soft); }
 .verdict.silent .call { color:var(--dim); }
 .bar { display:flex; align-items:center; gap:10px; margin-bottom:5px; font-size:13px; }
-.bar span { width:34px; color:var(--dim); } .bar em { width:48px; text-align:right;
+.bar span { width:9.5rem; color:var(--dim); white-space:nowrap;
+            overflow:hidden; text-overflow:ellipsis; } .bar em { width:48px; text-align:right;
   font-style:normal; color:var(--dim); }
 .track { flex:1; height:8px; background:#0d1116; border-radius:4px; overflow:hidden; }
 .track div { height:100%; background:var(--soft); }

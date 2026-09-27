@@ -121,6 +121,9 @@
 
 <script>
 const PITCHES = {{ pitches|tojson }};
+const PNAME = {{ pitch_names|tojson }};
+const pname = c => PNAME[c] || c;
+const plabel = c => `${c} — ${pname(c)}`;
 const OUTCOMES = {{ outcomes|tojson }};
 let arsenal = PITCHES;
 
@@ -223,7 +226,8 @@ async function loadArsenal(id) {
 }
 function rowHtml() {
   return '<div class="prow">'
-    + '<select class="pt">' + arsenal.map(p => `<option>${p}</option>`).join('') + '</select>'
+    + '<select class="pt">' + arsenal.map(p =>
+        `<option value="${p}">${plabel(p)}</option>`).join('') + '</select>'
     + '<select class="oc">' + OUTCOMES.map(o => `<option>${o}</option>`).join('') + '</select>'
     + '<label class="sa"><input type="checkbox" class="ab" checked> same AB</label>'
     + '<button type="button" class="rm" aria-label="remove">&times;</button></div>';
@@ -231,7 +235,8 @@ function rowHtml() {
 function refreshRows() {
   document.querySelectorAll('.prow .pt').forEach(sel => {
     const v = sel.value;
-    sel.innerHTML = arsenal.map(p => `<option>${p}</option>`).join('');
+    sel.innerHTML = arsenal.map(p =>
+      `<option value="${p}">${plabel(p)}</option>`).join('');
     if (arsenal.includes(v)) sel.value = v;
   });
 }
@@ -355,14 +360,15 @@ document.getElementById('f').onsubmit = async e => {
       side of the model is using league averages.</div>`;
   }
   const dist = d.distribution.map(([p, v]) =>
-    `<div class="bar"><span>${p}</span>
+    `<div class="bar"><span title="${p}">${pname(p)}</span>
        <div class="track"><div style="width:${(v*100).toFixed(1)}%"></div></div>
        <em>${(v*100).toFixed(1)}%</em></div>`).join('');
 
   out.innerHTML = mism + unknown + (d.speaks
     ? `<div class="verdict ${d.family}">
          <div class="call">${d.call}</div>
-         <div class="det">likeliest ${d.family}: <strong>${d.likeliest}</strong>
+         <div class="det">likeliest ${d.family}:
+              <strong>${pname(d.likeliest)}</strong>
               &middot; ${(d.confidence*100).toFixed(0)}% confident</div>
        </div>
        <h3>Full distribution</h3>${dist}`
@@ -377,7 +383,7 @@ document.getElementById('f').onsubmit = async e => {
 /* custom pitch mix */
 function mixRow() {
   return '<div class="mixrow"><select class="mp">'
-    + PITCHES.map(p => `<option>${p}</option>`).join('')
+    + PITCHES.map(p => `<option value="${p}">${plabel(p)}</option>`).join('')
     + '</select><input class="mw" type="number" min="0" max="100" value="20">'
     + '<span class="pct">%</span>'
     + '<button type="button" class="rm" aria-label="remove">&times;</button></div>';
