@@ -304,10 +304,13 @@ document.getElementById('f').onsubmit = async e => {
   // flagging when they picked someone we then failed to find.
   let unknown = '';
   if (d.custom_arsenal) {
-    unknown = `<div class="warn">Custom pitch mix: the model does not know
-      this pitcher, only what he throws. It is reading the count, the
-      sequence and that mix — not his tendencies. The accuracy figures
-      above were measured WITH pitcher identity and do not apply here.</div>`;
+    unknown = `<div class="warn">Custom pitch mix. Measured by ablation on
+      held-out MLB pitches, supplying the arsenal by hand instead of
+      naming the pitcher costs nothing — what the model needs from a
+      pitcher's identity is mostly which pitches are possible, and you
+      just told it. <strong>But that was measured on major-league
+      pitching.</strong> Nothing here validates college or high-school
+      arms, whose sequencing and count behaviour may differ.</div>`;
   } else if (!d.known_pitcher) {
     unknown = `<div class="warn">No history for this pitcher — falling back
       to league averages. Treat this read as much weaker than the numbers

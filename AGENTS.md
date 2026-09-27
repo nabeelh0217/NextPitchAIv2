@@ -217,11 +217,17 @@ features do anything at all**. 10-class top-1 reads lower than the old
   pitcher who is not in the data (college, high school, a call-up). The
   embedding goes to index 0 — the unknown-pitcher bucket the model was
   TRAINED with — and the mask comes from the listed pitches.
-  **Its accuracy is UNMEASURED and the +4.2 point claim does NOT apply
-  to it**: that was measured with pitcher identity, which this mode
-  discards, and identity is the largest single signal in the model. Run
-  `diagnose_unknown_pitcher.py` before attaching any number to it. The
-  page already says so on every custom-mix prediction.
+  **Measured (2026-09-27): it costs essentially nothing.** Ablating the
+  embedding, zone priors and matchup history and adding noise to the mix
+  moves the edge +5.6% -> +6.1% and top-1 by -0.2 points. What the model
+  needs from a pitcher's identity is mostly WHICH PITCHES ARE POSSIBLE,
+  and that is the arsenal mask, which custom mode supplies by hand. This
+  also explains the +0.0435 log-loss lift: past the arsenal, the edge is
+  count and sequence, both of which survive.
+  **It does NOT validate college or high-school use.** That was MLB
+  pitching with identity hidden, not pitchers whose sequencing the model
+  has never seen. Claim "supply the arsenal instead of the name", never
+  "it works outside affiliated baseball" — that needs non-MLB data.
 - Serving tables are keyed by **raw MLB id** with the encoded embedding
   row in an `enc` column. Mixing the two makes every lookup miss
   silently and fall back to league averages while the site still returns

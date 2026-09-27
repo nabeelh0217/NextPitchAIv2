@@ -889,3 +889,42 @@ the 65% threshold rose 31.1% -> 35.2%.
 
 Model shipped to the site: run 12, temporal split, no location head,
 honest mask.
+
+---
+
+## Unknown-pitcher ablation (2026-09-27) — custom arsenals hold up
+
+Does the tool still work for a pitcher it has never seen, given only a
+hand-entered pitch mix? Measured by ablation on the 729,688 held-out
+2025 rows, no retraining.
+
+| condition | top-1 | hard/soft | speaks | tool | table | edge |
+|---|---|---|---|---|---|---|
+| full | 43.7% | 61.4% | 33.1% | 72.4% | 66.8% | +5.6% |
+| no-id (embedding blanked) | 43.9% | 61.2% | 33.4% | 72.8% | 66.4% | +6.4% |
+| **custom** (no embedding, no zone priors, no matchup, noisy mix) | **43.5%** | **61.0%** | **33.3%** | **72.5%** | **66.5%** | **+6.1%** |
+
+**Giving up the pitcher's identity costs essentially nothing.** Verified
+the ablation is real and not a no-op: 25 of 63 context columns change,
+mean |delta| 0.31 in scaled units.
+
+### Why, and what it does NOT mean
+
+Pitcher identity matters enormously, but the part that matters is
+**which pitches are possible**, and that lives in the arsenal MASK — not
+in the embedding or the priors. Custom mode supplies the mask by hand,
+so it keeps the load-bearing piece. This also explains the standing
+result that log-loss lift over a smoothed pitcher prior is only +0.0435:
+past the arsenal, the model's remaining edge comes from the count and
+the sequence, both of which survive.
+
+**This does not validate college or high-school use.** The measurement
+is MLB pitches with identity hidden, which is not the same as pitchers
+whose sequencing, velocity and count behaviour the model has never seen.
+The honest claim is "you can supply the arsenal instead of the name",
+not "it works outside affiliated baseball". Validating that needs
+non-MLB data.
+
+The absolute edges here are NOT section 6's (no temperature calibration,
+scout table built differently) — `full` reads +5.6% where section 6 says
++4.2%. Compare the rows to each other; quote the gate for the claim.
