@@ -34,13 +34,19 @@
 </svg>
 <header>
   <h1>NextPitchAI</h1>
-  <p class="sub">One call: gear up, or stay back.</p>
+  <p class="sub">Which pitch is coming — and whether that is worth acting on.</p>
+  <nav class="tabs" role="tablist">
+    <button class="tab on" role="tab" data-tab="tool" aria-selected="true">The Read</button>
+    <button class="tab" role="tab" data-tab="how" aria-selected="false">How it works</button>
+    <button class="tab" role="tab" data-tab="about" aria-selected="false">About</button>
+  </nav>
 </header>
 
 {% if error %}
 <div class="panel err"><strong>Not ready.</strong><pre>{{ error }}</pre></div>
 {% else %}
 
+<section id="pane-tool" class="pane">
 {% if claim and claim.recommended %}
 <div class="panel claim">
   <h2>What this tool actually does</h2>
@@ -146,6 +152,94 @@
 
 <div class="panel" id="out"><p class="muted">Set the situation and ask.</p></div>
 </div>
+</section>
+
+<section id="pane-how" class="pane" hidden>
+  <div class="panel prose">
+    <h2>The problem</h2>
+    <p>A 95&nbsp;mph fastball reaches the plate in about <strong>400
+    milliseconds</strong>, and a hitter has roughly half that to decide whether
+    to swing. Nobody can act on “slider 23%, changeup 19%, sinker 14%” in that
+    window. There is really only one decision available:
+    <strong>gear up for a fastball, or stay back on something slower.</strong></p>
+
+    <h2>What this does</h2>
+    <p>You describe the situation — who is pitching, the count, and what he has
+    already thrown this at-bat. The model predicts his next pitch, then
+    collapses that into the one call you can actually use in the box:</p>
+    <ul>
+      <li><strong class="hard-ink">GEAR UP</strong> — fastball family
+          (four-seam, sinker, cutter)</li>
+      <li><strong class="soft-ink">STAY BACK</strong> — anything slower
+          (slider, changeup, curve, splitter, sweeper)</li>
+      <li><strong>NO READ</strong> — not confident enough to be worth your
+          attention</li>
+    </ul>
+    <p class="note">The last few pitches matter more than anything else you
+    enter. A hitter who just swung through a slider is in a different at-bat
+    from one who fouled off three fastballs, and the model reads that.</p>
+
+    <h2>Why it stays quiet most of the time</h2>
+    <p>On roughly two thirds of pitches it says <strong>NO READ</strong>. That
+    is the design, not a shortcoming. Gearing up for a fastball and getting a
+    changeup is worse than having had no opinion, so it only speaks when the
+    read is strong enough to act on. The silence is the feature.</p>
+
+    {% if claim and claim.recommended %}
+    <h2>What the numbers mean</h2>
+    <table class="nums">
+      <tr><td><strong>{{ '%.0f'|format(claim.recommended.coverage * 100) }}%</strong></td>
+          <td>how often it says anything at all</td></tr>
+      <tr><td><strong>{{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}%</strong></td>
+          <td>how often it is right when it does speak</td></tr>
+      <tr><td><strong>{{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}%</strong></td>
+          <td>how often an ordinary count-based scouting report would be right
+              on those same pitches</td></tr>
+      <tr><td><strong>+{{ '%.1f'|format(claim.recommended.edge * 100) }}</strong></td>
+          <td>the gap between those two — the part that is new information</td></tr>
+    </table>
+    <p>That last line is the whole thing. Being right
+    {{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}% sounds strong
+    until you learn a plain scouting report gets
+    {{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}% on the same
+    pitches. The honest claim is the <em>difference</em>, and it is a few
+    points wide.</p>
+    {% endif %}
+
+    <h2>What it is not</h2>
+    <p>It will not beat a scouting report across the board. Measured over every
+    situation, a fixed per-count rule is as good or slightly better. Its value
+    is narrower: <strong>spotting the moments when the usual read is
+    wrong.</strong></p>
+    <p class="note">Every figure here was measured on a full season the model
+    never saw while training{% if claim %} ({{ '{:,}'.format(claim.n_val) }}
+    pitches){% endif %}. A model scored on data it trained on looks far better
+    and means nothing.</p>
+
+    <h2>Beyond the majors</h2>
+    <p>Set the pitcher source to <em>Enter a pitch mix</em> and it works for
+    someone who is not in the data at all — a college or high-school arm. List
+    what he throws and roughly how often. Testing showed that giving up the
+    pitcher's name costs almost nothing, because what the model mainly needs is
+    <em>which pitches are possible</em>, and you just supplied that. It has not
+    been validated below the professional level, where sequencing habits
+    differ.</p>
+  </div>
+</section>
+
+<section id="pane-about" class="pane" hidden>
+  <div class="panel prose">
+    <h2>{{ about.name }}</h2>
+    <p class="lede">{{ about.tagline }}</p>
+    {% for para in about.body %}<p>{{ para }}</p>{% endfor %}
+    {% if about.links %}
+    <p class="links">
+      {% for l in about.links %}<a href="{{ l.url }}" target="_blank"
+         rel="noopener noreferrer">{{ l.label }}</a>{% endfor %}
+    </p>
+    {% endif %}
+  </div>
+</section>
 {% endif %}
 
 <script>
@@ -455,6 +549,21 @@ document.getElementById('pmode').onchange = e => {
 document.getElementById('mixrows').addEventListener('change', () => {
   arsenal = [...document.querySelectorAll('.mixrow .mp')].map(s => s.value);
   refreshRows();
+});
+
+/* tabs */
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.pane').forEach(pane => {
+      pane.hidden = pane.id !== 'pane-' + btn.dataset.tab;
+    });
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  });
 });
 </script>
 </body>

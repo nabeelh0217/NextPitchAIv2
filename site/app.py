@@ -21,6 +21,27 @@ from flask import Flask, jsonify, render_template, request
 from predictor import NotBuilt, Predictor
 from pitch_features import FASTBALL_FAMILY, OUTCOME_NAMES, PITCH_NAMES
 
+# Everything on the About tab, in one place so it can be edited without
+# touching markup. Deliberately sparse: fill in what you want public,
+# delete what you do not.
+ABOUT = {
+    "name": "Nabeel Hussain",
+    "tagline": "Built NextPitchAI.",
+    "body": [
+        "TODO — a few sentences about yourself: what you study or do, how you "
+        "got into baseball analytics, and what you are looking for.",
+        "TODO — why you built this. The honest version reads better than the "
+        "polished one: you wanted to know whether a model could give a hitter "
+        "a real edge, and most of the work turned out to be figuring out how "
+        "to tell whether it actually had.",
+    ],
+    "links": [
+        {"label": "GitHub", "url": "https://github.com/nabeelh0217/NextPitchAIv2"},
+        # {"label": "LinkedIn", "url": "https://www.linkedin.com/in/..."},
+        # {"label": "Email", "url": "mailto:you@example.com"},
+    ],
+}
+
 app = Flask(__name__)
 _P = None
 _ERR = None
@@ -48,7 +69,8 @@ def index():
         pitches=p.classes if p else [],
         pitch_names=PITCH_NAMES,
         hard_family=sorted(FASTBALL_FAMILY),
-        outcome_names=OUTCOME_NAMES)
+        outcome_names=OUTCOME_NAMES,
+        about=ABOUT)
 
 
 @app.route("/api/arsenal/<int:pitcher>")
