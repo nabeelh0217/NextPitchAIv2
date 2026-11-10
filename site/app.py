@@ -26,14 +26,30 @@ from pitch_features import FASTBALL_FAMILY, OUTCOME_NAMES, PITCH_NAMES
 # delete what you do not.
 ABOUT = {
     "name": "Nabeel Hussain",
-    "tagline": "Built NextPitchAI.",
+    "tagline": "I built NextPitchAI to find out whether a model could give a "
+               "hitter a real advantage in the box — not a better accuracy "
+               "number, an actual edge.",
     "body": [
-        "TODO — a few sentences about yourself: what you study or do, how you "
-        "got into baseball analytics, and what you are looking for.",
-        "TODO — why you built this. The honest version reads better than the "
-        "polished one: you wanted to know whether a model could give a hitter "
-        "a real edge, and most of the work turned out to be figuring out how "
-        "to tell whether it actually had.",
+        "Most of the work turned out to be measurement rather than modelling. "
+        "The first version looked good: 48% accuracy across ten pitch types, "
+        "well above the 42% you get from knowing nothing but who is on the "
+        "mound. Then I scored it against the thing a hitter already has — a "
+        "count-based scouting report — and most of the apparent edge "
+        "evaporated. The model mostly knew that pitchers throw fastballs on "
+        "3-0, which every hitter also knows.",
+
+        "Rebuilding the evaluation was harder than rebuilding the model. "
+        "Testing on randomly held-out pitches let it see other pitches from "
+        "the same at-bat, which flattered it badly; the honest test is a "
+        "whole season it has never seen. Several results I was pleased with "
+        "did not survive that change.",
+
+        "What is here is what survived. It learns from about 2.9 million "
+        "pitches thrown between 2022 and 2024 and is measured on all of 2025, "
+        "a season held out entirely. It speaks on roughly a third of pitches "
+        "and beats a count-split scouting report by a few points there, and "
+        "stays quiet the rest of the time. That is a smaller claim than I set "
+        "out hoping for. It is the one I can defend.",
     ],
     "links": [
         {"label": "GitHub", "url": "https://github.com/nabeelh0217/NextPitchAIv2"},
