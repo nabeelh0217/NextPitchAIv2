@@ -122,6 +122,9 @@ h3 {
   font-family:"Barlow Condensed", system-ui, sans-serif;
   letter-spacing:.06em; font-size:17px; text-transform:uppercase;
 }
+/* A difference that could not be told from zero is not good news, and
+   must not be dressed as it: no green. */
+.claim .edge.flat { color:var(--dim); }
 .claim .caveat {
   margin:0; color:var(--dim); font-size:12.5px; line-height:1.65;
   border-top:1px solid var(--line); padding-top:12px;

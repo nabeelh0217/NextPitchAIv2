@@ -47,27 +47,70 @@
 {% else %}
 
 <section id="pane-tool" class="pane">
-{% if claim and claim.recommended %}
+{% if cv %}
 <div class="panel claim">
   <h2>What this tool actually does</h2>
   <p class="big">
-    On <strong>{{ '%.0f'|format(claim.recommended.coverage * 100) }}%</strong>
-    of pitches it gives you a read. It is right
-    <strong>{{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}%</strong>
-    of the time there. A count-split scouting report would be right
-    <strong>{{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}%</strong>
-    on those same pitches.
+    On <strong>{{ cv.coverage }}</strong> of pitches it gives you a read.
+    It is right <strong>{{ cv.tool }}</strong> of the time there.
+    {{ cv.bar_cap }} would be right <strong>{{ cv.table }}</strong> on those
+    same pitches.
   </p>
-  <p class="edge">Edge: +{{ '%.1f'|format(claim.recommended.edge * 100) }} points
-     &middot; it says nothing on the other
-     {{ '%.0f'|format(100 - claim.recommended.coverage * 100) }}%.</p>
+  {% if cv.status == 'not_confirmed' %}
+  <p class="edge flat">Difference: {{ cv.edge }} points —
+     {% if cv.sign == 'behind' %}the scouting report was ahead{% else %}too
+     small to tell from zero{% endif %}
+     &middot; it says nothing on the other {{ cv.silent }}.</p>
+  {% else %}
+  <p class="edge">Edge: {{ cv.edge }} points
+     &middot; it says nothing on the other {{ cv.silent }}.</p>
+  {% endif %}
   <p class="caveat">
-    Measured on {{ '{:,}'.format(claim.n_val) }} pitches from a season the
-    model never trained on ({{ claim.split }}).
-    <strong>This is an overlay, not a replacement for a scouting report.</strong>
-    Across all situations a fixed per-count rule is as good or better
-    ({{ '%+.1f'|format(claim.section5_lift_vs_scout * 100) }} points).
-    Its value is knowing <em>when</em> to deviate.
+    {% if cv.tested %}
+      Tested on {{ cv.n }} pitches from the {{ cv.season }} season. The model
+      learned from seasons through {{ cv.train_through }} and its settings were
+      fixed on {{ cv.tuned_on }}; nothing was adjusted on {{ cv.season }}.
+      {% if cv.bar_detail %}The scouting report it is measured against is
+      {{ cv.bar_detail }}.{% endif %}
+      {% if cv.ci %}The 95% interval on the difference runs from
+      {{ cv.ci }} points.{% endif %}
+      {% if cv.status == 'not_confirmed' %}
+        <strong>This test does not show the tool beating an up-to-date
+        scouting report.</strong> An earlier figure on this page did; it was
+        measured against a report frozen before the season began, which is
+        an easier bar than the one a hitter actually has.
+      {% elif cv.status == 'reduced' %}
+        <strong>The edge is real but small</strong> — under the
+        +{{ cv.min_edge }} points this project set as its bar before looking.
+      {% endif %}
+    {% elif cv.status == 'validation_only' %}
+      Measured on {{ cv.n }} pitches from {{ cv.season }}, the season the
+      model's settings were tuned on. The confidence threshold was chosen on
+      these same pitches, so read this as a tuning result, not a test.
+      {% if cv.bar_detail %}The scouting report it is measured against is
+      {{ cv.bar_detail }}.{% endif %}
+    {% else %}
+      Measured on {{ cv.n }} pitches from a season the model never trained on
+      ({{ cv.split }}), against a scouting report frozen before that season
+      began. A report kept up to date through the season is a harder bar, and
+      this figure has not yet been re-measured against it.
+    {% endif %}
+    {% if cv.overall == 'ahead' %}
+      Across every situation, not only where it speaks, it is ahead of that
+      report as well ({{ cv.overall_lift }} points).
+    {% elif cv.overall == 'level' %}
+      <strong>This is an overlay, not a replacement for a scouting
+      report.</strong> Across every situation the two cannot be told apart
+      ({{ cv.overall_lift }} points).
+    {% elif cv.overall == 'behind' %}
+      <strong>This is not a replacement for a scouting report.</strong> Across
+      every situation the report is ahead ({{ cv.overall_lift }} points).
+    {% else %}
+      <strong>This is an overlay, not a replacement for a scouting report.</strong>
+      Across all situations a fixed per-count rule is as good or better
+      ({{ cv.overall_lift }} points). Its value is knowing <em>when</em> to
+      deviate.
+    {% endif %}
   </p>
 </div>
 {% endif %}
@@ -180,41 +223,63 @@
     from one who fouled off three fastballs, and the model reads that.</p>
 
     <h2>Why it stays quiet most of the time</h2>
-    <p>On roughly two thirds of pitches it says <strong>NO READ</strong>. That
-    is the design, not a shortcoming. Gearing up for a fastball and getting a
-    changeup is worse than having had no opinion, so it only speaks when the
-    read is strong enough to act on. The silence is the feature.</p>
+    <p>On {% if cv %}about {{ cv.silent }} of{% else %}most{% endif %} pitches
+    it says <strong>NO READ</strong>. That is the design, not a shortcoming.
+    Gearing up for a fastball and getting a changeup is worse than having had
+    no opinion, so it only speaks when the read is strong enough to act on.</p>
 
-    {% if claim and claim.recommended %}
+    {% if cv %}
     <h2>What the numbers mean</h2>
     <table class="nums">
-      <tr><td><strong>{{ '%.0f'|format(claim.recommended.coverage * 100) }}%</strong></td>
+      <tr><td><strong>{{ cv.coverage }}</strong></td>
           <td>how often it says anything at all</td></tr>
-      <tr><td><strong>{{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}%</strong></td>
+      <tr><td><strong>{{ cv.tool }}</strong></td>
           <td>how often it is right when it does speak</td></tr>
-      <tr><td><strong>{{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}%</strong></td>
-          <td>how often an ordinary count-based scouting report would be right
-              on those same pitches</td></tr>
-      <tr><td><strong>+{{ '%.1f'|format(claim.recommended.edge * 100) }}</strong></td>
-          <td>the gap between those two — the part that is new information</td></tr>
+      <tr><td><strong>{{ cv.table }}</strong></td>
+          <td>how often {{ cv.bar }} would be right on those same pitches</td></tr>
+      <tr><td><strong>{{ cv.edge }}</strong></td>
+          <td>the gap between those two, in points{% if cv.beats %} — the part
+              that is new information{% endif %}</td></tr>
     </table>
-    <p>That last line is the whole thing. Being right
-    {{ '%.1f'|format(claim.recommended.tool_accuracy * 100) }}% sounds strong
-    until you learn a plain scouting report gets
-    {{ '%.1f'|format(claim.recommended.table_accuracy * 100) }}% on the same
-    pitches. The honest claim is the <em>difference</em>, and it is a few
-    points wide.</p>
+    <p>That last line is the whole thing. Being right {{ cv.tool }} sounds
+    strong until you learn a scouting report gets {{ cv.table }} on the same
+    pitches. The honest claim is the <em>difference</em>{% if cv.status == 'not_confirmed' %},
+    and on a season the model had never seen
+    {% if cv.sign == 'behind' %}the report came out ahead.{% else %}there was
+    none that could be told apart from zero.{% endif %}{% else %}:
+    {{ cv.edge }} points.{% endif %}</p>
     {% endif %}
 
     <h2>What it is not</h2>
+    {% if cv and cv.status == 'not_confirmed' %}
+    <p>On current evidence it is <strong>not better than a scouting report</strong>
+    — not across the board, and not on the pitches where it speaks. What it
+    does give you is the whole picture for one pitch: every pitch he could
+    throw here and how likely the model thinks each one is, with the sequence
+    so far taken into account. Treat it as a second opinion, not an edge.</p>
+    {% elif cv and cv.overall == 'ahead' %}
+    <p>It is not a reason to stop reading the pitcher. Its calls are only worth
+    acting on where it is confident, which is why it stays silent the rest of
+    the time.</p>
+    {% else %}
     <p>It will not beat a scouting report across the board. Measured over every
-    situation, a fixed per-count rule is as good or slightly better. Its value
-    is narrower: <strong>spotting the moments when the usual read is
-    wrong.</strong></p>
-    <p class="note">Every figure here was measured on a full season the model
-    never saw while training{% if claim %} ({{ '{:,}'.format(claim.n_val) }}
-    pitches){% endif %}. A model scored on data it trained on looks far better
-    and means nothing.</p>
+    situation, a scouting report is as good or better. Its value is narrower:
+    <strong>spotting the moments when the usual read is wrong.</strong></p>
+    {% endif %}
+    <p class="note">
+    {% if cv and cv.tested %}
+      Every figure here comes from the {{ cv.season }} season ({{ cv.n }}
+      pitches). The model learned from seasons through {{ cv.train_through }},
+      its settings were tuned on {{ cv.tuned_on }}, and {{ cv.season }} was used
+      for nothing but this test. A model scored on data it trained or tuned on
+      looks better and means less.
+    {% else %}
+      Every figure here was measured on a full season the model never saw while
+      training{% if cv %} ({{ cv.n }} pitches){% endif %}. A model scored on
+      data it trained on looks far better and means nothing.
+    {% endif %}
+    {% if data_through %}Pitcher tendencies and arsenals are current through
+    {{ data_through }}.{% endif %}</p>
 
     <h2>Beyond the majors</h2>
     <p>Set the pitcher source to <em>Enter a pitch mix</em> and it works for

@@ -100,7 +100,12 @@ class Predictor:
                       if claim_path.exists() else None)
         rec = (self.claim or {}).get("recommended") or {}
         self.temperature = float((self.claim or {}).get("temperature", 1.0))
-        self.threshold = float(rec.get("threshold", 0.65))
+        # The threshold the gate locked. It is recorded on the claim itself
+        # as well as on the headline row, because a test with no headline
+        # (nothing cleared the bar) must still speak at the locked setting
+        # rather than fall back to a constant nobody measured.
+        self.threshold = float((self.claim or {}).get("threshold")
+                               or rec.get("threshold") or 0.65)
 
         # NumPy, not TensorFlow. Importing TF costs ~660MB RSS against a
         # 512MB box; the exported weights run the same graph in ~30MB and
