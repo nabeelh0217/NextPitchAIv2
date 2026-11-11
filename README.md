@@ -99,17 +99,35 @@ all on the natural class distribution — and writes it to
 `data_v5/eval_report_v5.txt`.
 
 ### `evaluate_model.py`
-Regenerates that report from `data_v5/best_model_v5.keras` without
-retraining (same split, same numbers). Run it if the terminal output is
-gone: `.venv/bin/python evaluate_model.py`.
+Re-scores `data_v5/best_model_v5.keras` without retraining and without
+TensorFlow, the way the gate measures it. If the terminal output is gone
+and you want exactly what training printed:
+`.venv/bin/python evaluate_model.py --as-trained`.
+
+### `analyze_actionability.py` — the number that matters
+Top-1 accuracy is not the goal; a hitter's edge over the scouting report
+he already has is. This is the gate that measures it, and the only source
+of the figures on the site. To test the shipped model on a season it has
+never seen, with nothing tuned on that season:
+
+```bash
+.venv/bin/python 01_scrape_statcast.py
+.venv/bin/python 02_preprocess.py --freeze-from data_v5 --out-dir data_ext
+.venv/bin/python analyze_actionability.py --data-dir data_ext --test-season 2026
+```
+
+`.venv/bin/python test_leakfree.py` checks, in a few seconds and without
+any data, that neither the model's arsenal mask nor the scouting table it
+is compared against can see the pitch being judged or anything after it.
 
 ## Notes
 
-- Large artifacts (`*.parquet`, `*.npy`, `*.keras`, `*.pkl`, `data_v5/`)
-  are gitignored — keep them local or use Git LFS.
+- Large artifacts (`*.parquet`, `*.npy`, `*.keras`, `*.pkl`, `data_v5/`,
+  `data_ext/`) are gitignored — keep them local or use Git LFS.
 - Junk pitch rows (pitchouts, intentional balls, unknowns) are dropped:
   not real pitch-selection decisions.
 - `data_v5/` naming is kept for pipeline continuity even though the
   schema is v6 (pitch-type targets); `meta_v5.json` carries
   `"version": 6`.
-- Next up: Flask website (`site/`) serving arsenal-masked predictions.
+- The Flask site lives in `site/` and deploys to Render; see
+  `site/DEPLOY.md`. `AGENTS.md` is the project's memory of record.

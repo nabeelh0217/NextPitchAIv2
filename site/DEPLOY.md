@@ -24,24 +24,50 @@ Commands below use the macOS/Linux venv path. On Windows use
 
 ## 1. Build the bundle locally
 
-Run these on the machine that has `data_v5/`, in this order. The first
-two need your training environment; only the third matters for deploy.
+Run these on the machine that has `data_v5/`, one line at a time. Do not
+paste them as a block with comments on the end; zsh treats the `#` as
+part of the command.
+
+**A new season, same model** (no retraining; this is what puts a clean
+test number on the site):
 
 ```bash
-.venv/bin/python analyze_actionability.py          # writes data_v5/product_claim_v5.json
-.venv/bin/python site/player_names.py --from-serving   # MLB names; needs internet
-.venv/bin/python site/build_serving_artifacts.py   # bundle + weight export
+.venv/bin/python 01_scrape_statcast.py
+.venv/bin/python 02_preprocess.py --freeze-from data_v5 --out-dir data_ext
+.venv/bin/python analyze_actionability.py --data-dir data_ext --test-season 2026
+.venv/bin/python site/build_serving_artifacts.py --data-dir data_ext
 ```
 
-`build_serving_artifacts.py` does the name fetch and the weight export
-itself, so the middle step is only needed if you want to refresh names
-without rebuilding. `--no-names` and `--no-model` skip those stages.
+What each one does:
+
+1. Fetches only the weeks the parquet does not already have and appends
+   them. The rows the model was built on are not touched.
+2. Builds `data_ext/` with the ID maps and scalers frozen, and stops with
+   an error unless the 2022-2025 rows come out identical to `data_v5/`.
+   Needs about as much memory and disk again as the original preprocess.
+3. The gate. Ten to fifteen minutes: four passes over a season, in
+   NumPy, with progress printed. Read sections A, 6 and 7 and the two
+   verdicts. It is deterministic, so running it twice gives the same
+   answer; what you may not do is change a setting after seeing it.
+4. The bundle, from the same directory the gate just measured.
+
+**After a retrain** (the model changed; `data_v5/` is the dataset):
+
+```bash
+.venv/bin/python analyze_actionability.py
+.venv/bin/python site/build_serving_artifacts.py
+```
+
+The builder fetches player names and exports the weights itself.
+`--no-names` and `--no-model` skip those stages. It will not run without
+a claim in the dataset directory, and it refuses a claim that was
+measured on a different model file than the one it is exporting.
 
 Expect output ending like:
 
 ```
 Serving bundle written to site/serving
-  1,483 pitchers, 3,102 batters, 8.4 MB
+  1,612 pitchers, 3,240 batters, 9.1 MB, data through 2026-09-27
 ```
 
 It refuses to write a bundle over `BUNDLE_MAX_MB` (40). If you trip
@@ -54,8 +80,14 @@ that, raise `MIN_MATCHUP_MEETINGS` — do not raise the cap.
 ```
 
 Confirm the claim panel shows a coverage figure next to the accuracy
-figure, and that the pickers show names rather than `Pitcher 605483`.
-Numeric ids mean the name fetch did not run.
+figure, that it names the season it was tested on, and that the pickers
+show names rather than `Pitcher 605483`. Numeric ids mean the name fetch
+did not run.
+
+**Read the About tab too.** Its last paragraph is chosen by the gate's
+verdict (`ABOUT_CLOSING` in `app.py`), so it changes when the result
+does. It is written in the first person on your behalf — edit the
+wording there if it does not sound like you, but keep one per verdict.
 
 To rehearse the real thing:
 
@@ -220,6 +252,21 @@ builds, which ship their own OpenSSL and ignore the system keychain:
 
 Then re-run the name fetch and rebuild. The bundle itself builds fine
 without names.
+
+**`02_preprocess.py --freeze-from` stops with "does not reproduce".**
+The 2022-2025 rows no longer produce the arrays the model was trained
+on — usually because the parquet's old rows changed (a `--fresh`
+re-scrape) or a library was upgraded. Nothing was written. Do not pass
+`--allow-mismatch` to get past it for a number you intend to publish:
+the model would be scored on inputs it was not built with.
+
+**The gate says the dataset "has no row_meta_v5.npz".** It was built
+before the gate needed raw pitcher ids and integer counts. Run the
+`--freeze-from` line above; it does not refit anything.
+
+**The claim panel says the edge is "too small to tell from zero".**
+That is the result, not a bug. See `docs/EXPERIMENTS.md` for the
+criteria, which were fixed before the test was run.
 
 **No claim panel.** `product_claim_v5.json` is not in the bundle. Run
 `analyze_actionability.py`, then rebuild. Do not hand-write the numbers

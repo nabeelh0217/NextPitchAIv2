@@ -928,3 +928,204 @@ non-MLB data.
 The absolute edges here are NOT section 6's (no temperature calibration,
 scout table built differently) — `full` reads +5.6% where section 6 says
 +4.2%. Compare the rows to each other; quote the gate for the claim.
+
+---
+
+## Measurement overhaul (2026-11-11) — the bar was unfair, and 2025 was not a test
+
+No retraining. The run-12 model is unchanged; what changed is how it is
+measured. Four defects were found in the number the site shows ("+4.2
+points on 35.2% of pitches"), all of which flatter the model.
+
+### The four defects
+
+1. **The scouting table was frozen and the model's inputs were not.**
+   The bar was a pitcher x count table built from training rows (through
+   2024) and never updated. The model's own context features —
+   `arsenal_prior`, matchup history, the batter profile — are expanding
+   statistics that kept updating through every pitch of 2025. For a
+   rookie, or a veteran with a new pitch, the model knew and the table
+   did not, and the model was credited with "beating the scouting
+   report" for holding newer information. Worse, a pitcher x count cell
+   with fewer than 40 training pitches fell back to the league-wide rate
+   for that count, so for every 2025 debutant the "scouting report" was
+   not about him at all. A real report in August includes April to July.
+
+2. **Every scoring script fed the model a mask from the future.**
+   `03_train.py` replaces the full-data `X_arsenal_mask.npy` with a
+   training-rows mask in memory, and that is what run 12 trained with.
+   But `analyze_actionability.py`, `evaluate_model.py`,
+   `diagnose_unknown_pitcher.py` and `build_commit_cards.py` all loaded
+   the on-disk file, which is built over every row including 2025. The
+   honest mask was trained with and the leaky one was scored with. This
+   is why the ablation's `full` row read 43.7% top-1 against the training
+   report's 43.2%: same model, different mask.
+
+3. **2025 was the tuning season, not a test season.** Early stopping
+   chose the checkpoint on 2025 loss, the calibration temperature was
+   fitted on 2025, and the commit threshold was picked as the one with
+   the best 2025 edge. A number selected that way is an upper bound on
+   itself.
+
+4. **Players who debuted in the held-out season were fed noise.**
+   `02_preprocess.py` numbers every frequent player over all rows, 2025
+   included, so a 2025 debutant owns an embedding row that no training
+   row ever touched — it still holds its random initial values. The
+   model was trained to see index 0 (the unknown bucket) for a player it
+   does not know, and was instead handed a random vector. Found while
+   checking the serving bundle; it affects the live site as well.
+
+### What changed
+
+- **`live_scout`** (`evaluate_model.py`): the bar is now a scouting table
+  built only from pitches before the one being judged, with three rungs
+  of increasing difficulty — pitcher x count, x batter side, and that
+  cell weighted to the current season. Thin cells back off to the
+  pitcher's overall rate shifted by the league's count effect on the
+  logit scale. Its pseudo-counts are the model's own smoothing constants
+  (25 and 10), fixed in advance and not tuned on any held-out row.
+- **`causal_arsenal_mask`** (`pitch_features.py`): the model is scored
+  with each pitcher's arsenal as of the pitch — the types he had thrown
+  so far, all ones until 100 career pitches. `scoring_mask()` is the
+  only source of a mask for any scoring script; none of them reads
+  `X_arsenal_mask.npy` any more.
+- **`known_ids`** (`evaluate_model.py`): an id with no training rows is
+  sent to the unknown bucket, at scoring time and in the serving bundle.
+- **2026 as a clean test**: `01_scrape_statcast.py` appends the 2026
+  regular season without touching earlier rows; `02_preprocess.py
+  --freeze-from data_v5 --out-dir data_ext` extends the arrays with the
+  ID maps, scalers and league fallbacks frozen, and refuses to finish
+  unless the 2022-2025 rows reproduce the original arrays exactly;
+  `analyze_actionability.py --test-season 2026` fixes the temperature,
+  the threshold and the choice of bar on 2025 and scores 2026 once.
+- **Intervals**: every edge carries a 95% interval from a bootstrap that
+  resamples whole games, and whole pitchers, and reports the wider.
+  700,000 pitches are not 700,000 independent facts.
+- **No TensorFlow in any scoring path.** The `.keras` file is exported on
+  the spot and run through the NumPy forward pass (max |diff| vs Keras
+  2e-7 and the same argmax on every row of the synthetic set).
+- **Section A of the gate** re-derives the previously published number
+  from the same model with the old mask and the old table, then applies
+  each correction in turn, so the size of every one is visible.
+- The serving bundle is keyed by raw MLB id and carries arsenals current
+  through the newest pitch — the mask the gate measures — and the site's
+  wording is chosen by the gate's verdict, not written once.
+
+### Verified on a synthetic league
+
+Synthetic data says whether the code is right, never how big an effect
+is on real pitching. On a 5-season synthetic league (110,040 pitches,
+rookies in 2025 and 2026, pitchers who add a pitch):
+
+- The new gate re-derives the old gate's published number exactly
+  (69.3% / 75.1% / 73.1% / +2.0%, T = 0.550) before changing anything.
+- `test_leakfree.py`: 24 checks. Each fast routine against the slowest
+  obvious loop, and the property that matters — changing a pitch, or any
+  pitch after it, never changes the mask or the table's call on it. It
+  caught one real defect (an all-zero mask row at `min_history=0`).
+- Frozen-mode preprocessing reproduces all 88,032 original rows with max
+  difference 0, and detects a single tampered row.
+- `evaluate_model.py --as-trained` reproduces the training-time report
+  to every printed digit. Without the flag it scores the way the gate
+  does, so the two differ by exactly the mask and the unknown-id rule.
+- The rebuilt bundle serves a pitcher who debuted after training from
+  the unknown bucket with his own priors and arsenal, end to end through
+  the Flask app.
+
+On that league the old "+2.0" edge falls to +0.0 once the table is kept
+current, with the mask and unknown-id corrections moving it by 0.1 each.
+That is how the decomposition reads; it is not a forecast.
+
+### PRE-REGISTERED — written before any 2026 pitch was scored
+
+Fixed here, on 2026-11-11, with no real 2026 data in existence on any
+machine this project has run on. Do not edit after the test is run.
+
+Locked on the 2025 season, in this order, by the gate itself:
+1. Temperature: fitted on the first half of 2025.
+2. The bar: whichever live-table rung has the highest overall hard/soft
+   accuracy on 2025.
+3. Threshold: among {60, 65, 70, 75, 80}% with coverage >= 10% on 2025,
+   the one with the largest edge over that bar.
+
+Then 2026 is scored once. The verdict is read off the edge at that
+threshold against that bar:
+
+| verdict | condition on the 2026 edge | what the site may say |
+|---|---|---|
+| **CONFIRMED** | >= +2.0 points, coverage >= 10%, and the 95% interval excludes zero | the 2026 numbers, as an edge |
+| **REDUCED** | interval excludes zero, but edge < +2.0 | the 2026 numbers, stating it is under the bar set in advance |
+| **NOT CONFIRMED** | interval includes zero, or coverage < 10% | the 2026 numbers, stating that no edge over an up-to-date report was shown |
+
+Secondary, reported but not gating: section 5 on 2026 (model vs the bar
+across every pitcher x count situation with >= 60 pitches) as ahead /
+level / behind by the same kind of interval.
+
+What does NOT count, in advance:
+- Changing a threshold, a smoothing constant, the bar or the interval
+  method after seeing a 2026 number. If one of them is wrong, fix it,
+  say so here, and treat 2026 as spent — the next clean test is 2027 or
+  a part of 2026 set aside before looking.
+- Quoting the 2025 line once a 2026 line exists.
+- Retraining with 2026 in training or validation and still calling
+  2026 a test.
+
+My expectation, recorded so it cannot be revised afterwards: the edge
+will be well below +4.2. Defect 1 handed the model information the
+table lacked for exactly the pitchers a frozen table is worst at, and
+that is likely where much of the +4.2 came from. I do not know whether
+what remains is above zero.
+
+### RESULT
+
+_Pending — the scrape cannot run from the sandbox. Run the four commands
+under "How to run" in AGENTS.md and paste the report's sections A, 6, 7
+and the two verdicts here._
+
+| | speaks on | tool | bar | edge | 95% CI |
+|---|---|---|---|---|---|
+| published (old gate, 2025) | 35.2% | 72.5% | 68.3% | +4.2% | — |
+| 2025, fair measurement | | | | | |
+| **2026, clean test** | | | | | |
+
+### What this sets up
+
+The measurement is now the thing a model change is judged against. In
+the order I would try them, one per training round:
+
+1. **Give the model the table.** The live count x side rate is a single
+   expanding prior, built by the same leak-free primitive, and the model
+   currently has to infer it. If the table beats the model anywhere, the
+   cheapest fix is to hand the model the table and let it learn when to
+   deviate.
+2. **Train with what it is served.** Training uses a mask frozen at the
+   end of training; scoring and the site use a causal one, including the
+   all-ones row of a pitcher's first 100 pitches, which the model never
+   saw in training. And `03_train.py` still validates with never-trained
+   embedding rows passed through, so early stopping picks its checkpoint
+   on a loss that includes that noise — apply `known_ids` there too.
+3. **Measure as served.** The site sends park 0 and catcher 0 and fills
+   pitch physics with per-type medians. The gate scores with the real
+   values. Nobody has measured the difference.
+4. **Fix the 2025 spring-training rows** on the next full re-scrape
+   (`REGULAR_ONLY_FROM = 2022`). The 2025 window opens with the Tokyo
+   Series on 03-18, so it holds about a week of exhibition games; the
+   file has no `game_type` for those rows and cannot be filtered now.
+   2026 is regular season only.
+
+After any retrain that sees 2026, the next clean test season is 2027 —
+or split 2026 in advance, tune on the first half and test on the second.
+
+A retrain does not have to see it. `02_preprocess.py --fit-through 2025`
+(or `./run_pipeline.sh --fresh-preprocess --fit-through=2025`) fits the
+scalers, ID maps and league fallbacks on 2022-2025 only and still writes
+the 2026 rows, so the new model can be scored on 2026 with
+`analyze_actionability.py --test-season 2026` and no `data_ext/`. That
+is a second look at the same season, not a fresh one: every model
+change chosen after reading a 2026 result has been informed by 2026.
+Say so beside the number, and keep the count of looks here.
+
+Also changed in passing: `ENABLE_LOCATION_HEAD` now defaults to False in
+`03_train.py`. The head has been off since run 10 and the shipping model
+has none, but the default was still True and the runners pass no flags,
+so a plain `./run_pipeline.sh` would have trained a two-head model.
