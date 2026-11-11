@@ -8,23 +8,29 @@ Answers, empirically, the questions the reported metrics cannot:
   C. What is the ceiling, given how much pitchers randomize?
   D. Where does the model beat the prior, and where does it not?
 
-Parts A-C are pure numpy over data_v5/ and run in seconds.
-Part D loads the saved model and takes a few minutes.
+Parts A-D are pure numpy over the dataset and run in seconds.
+Part E scores the saved model (NumPy, no TensorFlow) and takes a few
+minutes.
+
+The mask examined is the one the model is SCORED with (evaluate_model.
+scoring_mask), not the X_arsenal_mask.npy on disk: that file is built
+over every row and knows the held-out season.
 
 Usage:
-    .venv/bin/python diagnose_arsenal.py          # A-C only (fast)
-    .venv/bin/python diagnose_arsenal.py --model  # also D
+    .venv/bin/python diagnose_arsenal.py          # A-D only (fast)
+    .venv/bin/python diagnose_arsenal.py --model  # also E
+    .venv/bin/python diagnose_arsenal.py --data-dir data_ext
 """
 
+import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
-from evaluate_model import load_split
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data_v5"
+from evaluate_model import (
+    DATA_DIR, known_ids, load_inputs, load_row_meta, load_scoring_model,
+    load_split, predict_rows, scoring_mask,
+)
 
 
 def hdr(title):
@@ -32,18 +38,25 @@ def hdr(title):
 
 
 def main():
-    with open(DATA_DIR / "meta_v5.json") as f:
-        meta = json.load(f)
+    ap = argparse.ArgumentParser(description="Arsenal / evaluation diagnostics.")
+    ap.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    ap.add_argument("--model", action="store_true",
+                    help="also score the saved model (part E)")
+    args = ap.parse_args()
+    data_dir = args.data_dir.resolve()
+
+    meta = json.loads((data_dir / "meta_v5.json").read_text())
     classes = meta["pitch_classes"]
     K = len(classes)
 
-    mask = np.load(DATA_DIR / "X_arsenal_mask.npy")
-    pid = np.load(DATA_DIR / "X_pitcher_id.npy")
-    y = np.load(DATA_DIR / "y_labels.npy")
+    pid = np.load(data_dir / "X_pitcher_id.npy")
+    y = np.load(data_dir / "y_labels.npy")
     N = len(y)
 
-    idx_tr, idx_val, split_desc = load_split(y)
+    idx_tr, idx_val, split_desc = load_split(y, data_dir)
     print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
+    mask, mask_desc = scoring_mask(pid, y, idx_tr, K, load_row_meta(data_dir))
+    print(f"Arsenal mask: {mask_desc}")
 
     # Rows share a mask per pitcher; collapse to unique pitchers via the mask
     # bit-pattern so "per pitcher" stats are not weighted by workload.
@@ -80,8 +93,8 @@ def main():
     totals = counts.sum(axis=1, keepdims=True)
     shares = np.divide(counts, np.maximum(totals, 1.0))
 
-    print("A pitch type is in the mask if thrown >=1 time EVER. How many of")
-    print("those are pitches the pitcher actually goes to?\n")
+    print("A pitch type is in the mask once it has been thrown at all. How many")
+    print("of those are pitches the pitcher actually goes to?\n")
     print(f"{'threshold':>12}{'mean types':>13}{'vs mask':>10}")
     row_shares = shares[pid]
     row_mask = mask > 0
@@ -163,21 +176,13 @@ def main():
           f"~{np.exp(1.3221):.2f}.")
 
     # ---------------------------------------------------------------
-    if "--model" in sys.argv:
+    if args.model:
         hdr("E. Per-pitcher: where does the model beat the prior?")
-        import tensorflow as tf
         print("Loading model + arrays...")
-        X = {k: np.load(DATA_DIR / f"X_{k}.npy") for k in
-             ["seq", "ctx", "pitcher_id", "batter_id", "pitcher_hand",
-              "batter_hand", "park_id", "catcher_id", "arsenal_mask"]}
-        model = tf.keras.models.load_model(
-            DATA_DIR / "best_model_v5.keras", compile=False)
-        probs = model.predict(
-            [X["seq"][idx_val], X["ctx"][idx_val], X["pitcher_id"][idx_val],
-             X["batter_id"][idx_val], X["pitcher_hand"][idx_val],
-             X["batter_hand"][idx_val], X["park_id"][idx_val],
-             X["catcher_id"][idx_val], X["arsenal_mask"][idx_val]],
-            batch_size=2048, verbose=0)
+        X = load_inputs(data_dir)
+        model = load_scoring_model(data_dir)
+        probs = predict_rows(model, X, idx_val, mask[idx_val], label="validation",
+                             known=known_ids(X, idx_tr))
 
         yv = y[idx_val]
         pv = pid[idx_val]

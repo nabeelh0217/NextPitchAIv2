@@ -213,6 +213,85 @@ def expanding_prior_rate(df: pd.DataFrame, group_cols, num_onehot: np.ndarray,
     return rate.astype(np.float32)
 
 
+# A pitcher's arsenal is only trusted once he has thrown this many
+# pitches; before that the mask is all ones, exactly as for an unknown
+# pitcher. Tied to MIN_PITCHER_APPEARANCES in 02_preprocess.py — the
+# point at which the project already treats a pitcher as known. Without
+# it a debutant's second pitch would be "impossible" unless it matched
+# his first.
+MASK_MIN_HISTORY = 100
+
+
+def dense_codes(*columns) -> np.ndarray:
+    """One int64 code per row, equal exactly when every column is equal.
+
+    Factorised rather than multiplied raw, so MLBAM ids in the hundreds of
+    thousands combined with count, side and season cannot overflow.
+    """
+    code = np.zeros(len(columns[0]), dtype=np.int64)
+    for col in columns:
+        uniq, inv = np.unique(np.asarray(col), return_inverse=True)
+        code = code * len(uniq) + inv.astype(np.int64)
+    return code
+
+
+def prior_group_cumsum(keys, values) -> np.ndarray:
+    """
+    For each row, the sum of `values` over EARLIER rows with the same key.
+
+    Rows must already be in chronological order. The current row is
+    excluded, and nothing after it is ever read — the same guarantee as
+    expanding_prior_dist, in a form the evaluation code can use on plain
+    arrays. `values` may be 1-D or 2-D; integer input is summed exactly.
+    """
+    keys = np.asarray(keys)
+    values = np.asarray(values)
+    n = len(keys)
+    if n == 0:
+        return values.astype(np.int64 if values.dtype.kind in "biu" else np.float64)
+    order = np.argsort(keys, kind="stable")   # stable keeps time order inside a key
+    k = keys[order]
+    v = values[order]
+    dtype = np.int64 if v.dtype.kind in "biu" else np.float64
+    excl = np.cumsum(v, axis=0, dtype=dtype) - v          # running total before the row
+    starts = np.ones(n, dtype=bool)
+    starts[1:] = k[1:] != k[:-1]
+    first = np.maximum.accumulate(np.where(starts, np.arange(n), 0))
+    out = np.empty_like(excl)
+    out[order] = excl - excl[first]
+    return out
+
+
+def causal_arsenal_mask(pitcher, labels, n_pitch: int,
+                        min_history: int = MASK_MIN_HISTORY) -> np.ndarray:
+    """
+    (N, n_pitch) uint8 arsenal mask using only what was known BEFORE each
+    pitch: 1 where this pitcher had already thrown that type.
+
+    This is the mask a live site has. The alternatives both mislead:
+    a mask built over every row tells the model which pitches a pitcher
+    will add next season, and one frozen at the end of training can never
+    predict a pitch he added since, however often he now throws it.
+
+    Keyed by the RAW pitcher id. Encoded ids pool every rare pitcher into
+    index 0, which would hand each of them the union of all the others'
+    arsenals. Until a pitcher has `min_history` pitches the row is all
+    ones. A row is never all zeros, whatever `min_history` is: a pitcher's
+    first pitch has no history at all, and an empty mask would put every
+    logit on the floor.
+    """
+    labels = np.asarray(labels)
+    keys = dense_codes(pitcher)
+    mask = np.zeros((len(labels), n_pitch), dtype=np.uint8)
+    total = np.zeros(len(labels), dtype=np.int64)
+    for k in range(n_pitch):                  # per class: bounded memory on 3M+ rows
+        prior = prior_group_cumsum(keys, (labels == k).astype(np.int32))
+        mask[:, k] = prior > 0
+        total += prior
+    mask[total < max(int(min_history), 1)] = 1
+    return mask
+
+
 def compute_times_through_order(df: pd.DataFrame) -> np.ndarray:
     """TTO = how many times this batter has faced this pitcher this game."""
     ab_keys = df[["game_pk", "pitcher", "batter", "at_bat_number"]].drop_duplicates()

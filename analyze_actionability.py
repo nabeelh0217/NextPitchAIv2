@@ -6,47 +6,73 @@ Average accuracy is the wrong question. A hitter has ~400ms and decides
 never sits on a 50/50 read. What matters is:
 
     In what fraction of pitches is the read strong enough to COMMIT,
-    and how right are we in exactly those pitches?
+    how right are we in exactly those pitches, and is that any better
+    than the scouting report he already has?
 
-A model that is 47% overall but 80% inside a confident 15% is a real
-product. A model that is 47% everywhere is not. This measures which one
-we have. No retraining — it scores the saved model's existing
-probabilities.
+This is the gate that answers it, and the only source of the numbers the
+website shows. No retraining and no TensorFlow: it scores the saved
+model with the NumPy forward pass.
+
+What "fair" means here — both changed in 2026-11, see docs/EXPERIMENTS.md:
+
+  * The model is scored with a CAUSAL arsenal mask: only the pitch types
+    a pitcher had thrown before each pitch. It used to be handed a mask
+    built over every row, which knew what he would add next season.
+  * The bar is a LIVE scouting table: count-split (and split by batter
+    side), built from every pitch before the one being judged. It used
+    to be a table frozen at the end of training, while the model's own
+    inputs kept updating through the season being scored.
+
+Both sides now see exactly what was known before the pitch, and nothing
+after it.
 
 Usage:
     .venv/bin/python analyze_actionability.py
+        Validation only: the season the model was tuned on.
+
+    .venv/bin/python analyze_actionability.py --data-dir data_ext --test-season 2026
+        Validation, then a CLEAN TEST. The calibration temperature, the
+        commit threshold and the choice of bar are fixed on the
+        validation season; the test season is then scored once with all
+        three locked. That is the number worth publishing.
 """
 
+import argparse
+import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
-from sklearn.model_selection import train_test_split
 
 from evaluate_model import (
-    DATA_DIR, SPLIT_SEED, SPLIT_TEST_SIZE, FASTBALL_FAMILY, load_split,
-    PRIOR_SMOOTHING, _smoothed, fit_temperature, apply_temperature,
+    DATA_DIR, FASTBALL_FAMILY, SCOUT_PLAIN, SCOUT_RUNGS, apply_temperature,
+    build_arsenal_mask, fit_temperature, full_mask_through, known_ids,
+    live_scout, load_inputs, load_row_meta, load_scoring_model, load_split,
+    predict_rows, read_split, scoring_mask, widest_ci,
 )
-
-REPORT_PATH = DATA_DIR / "actionability_report_v5.txt"
+from pitch_features import dense_codes
 
 # A hitter only benefits if committing beats his default. Below this the
 # advice is noise and the correct output is "react".
 COMMIT_THRESHOLDS = (0.60, 0.65, 0.70, 0.75, 0.80)
 
-# The bar for "this is worth shipping to a hitter", all three required:
-MIN_SHARE = 0.10   # speaks often enough to matter
-MIN_ACC = 0.70     # right often enough to commit the swing
+# The bar for "this is worth shipping to a hitter":
 MIN_COVERAGE = 0.10   # a read on fewer pitches than this is not a product
-MIN_EDGE = 0.02    # and BEATS the scouting report he already has.
+MIN_EDGE = 0.02       # and it BEATS the scouting table by this much there.
 # The edge is the load-bearing one. High accuracy on 3-0 counts is
-# worthless if the base rate already gives it to him for free.
+# worthless if the table already gives it to him for free.
 CONF_BINS = [0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.01]
 
 # Minimum held-out pitches in a (pitcher, count) cell before its
 # within-situation lift means anything.
 MIN_CELL_LIFT = 60
+
+# Resamples for the clustered intervals. Whole games, and whole pitchers,
+# are resampled; the wider of the two intervals is reported.
+N_BOOT = 2000
+
+# The frozen table's own rule, kept only to reproduce the old number.
+OLD_BAR_MIN_TRAIN = 40
 
 
 def hdr(out, title):
@@ -56,419 +82,664 @@ def hdr(out, title):
     out("=" * 72)
 
 
+def old_bar_lean(pid_enc, balls, strikes, hard, idx_tr, rows):
+    """
+    The bar the gate used before 2026-11, reproduced exactly: a pitcher x
+    count table built from TRAINING rows only and never updated, keyed by
+    the encoded pitcher id, falling back to the count's own hard rate on
+    the rows being judged when a cell is thin.
+
+    Not a fair bar — it is frozen while the model's inputs are not — and
+    kept for one purpose: showing what the published number was measured
+    against, and how far each correction moves it.
+    """
+    n_pid = int(pid_enc.max()) + 1
+    ch = np.zeros((n_pid, 4, 3))
+    ct = np.zeros((n_pid, 4, 3))
+    np.add.at(ch, (pid_enc[idx_tr], balls[idx_tr], strikes[idx_tr]), hard[idx_tr])
+    np.add.at(ct, (pid_enc[idx_tr], balls[idx_tr], strikes[idx_tr]), 1.0)
+    lean = np.zeros(len(rows), dtype=bool)
+    p, b, s, h = pid_enc[rows], balls[rows], strikes[rows], hard[rows]
+    for bb in range(4):
+        for ss in range(3):
+            sel = (b == bb) & (s == ss)
+            if not sel.any():
+                continue
+            tt = ct[p[sel], bb, ss]
+            rate = np.where(tt >= OLD_BAR_MIN_TRAIN,
+                            ch[p[sel], bb, ss] / np.maximum(tt, 1.0), h[sel].mean())
+            lean[sel] = rate >= 0.5
+    return lean
+
+
+def binary_read(probs, fam):
+    """(P(hard), the call, its confidence) from class probabilities."""
+    p_hard = probs[:, fam == 1].sum(1)
+    return p_hard, p_hard >= 0.5, np.maximum(p_hard, 1.0 - p_hard)
+
+
+def slice_rows(conf, tool_ok, tables):
+    """One dict per commit threshold: coverage, tool accuracy, and each
+    table's accuracy on the SAME advised pitches."""
+    rows = []
+    for t in COMMIT_THRESHOLDS:
+        sel = conf >= t
+        if sel.sum() == 0:
+            continue
+        rows.append({
+            "threshold": float(t), "coverage": float(sel.mean()),
+            "n": int(sel.sum()), "tool": float(tool_ok[sel].mean()),
+            **{name: float(ok[sel].mean()) for name, ok in tables.items()},
+        })
+    return rows
+
+
+def cell_summary(pitcher, balls, strikes, hard, tool_ok, bar_ok):
+    """
+    Model vs bar across every (pitcher, count) situation with enough
+    held-out pitches — the "is it better everywhere, or only where it
+    speaks" question. Also the best CONSTANT call per cell fitted on these
+    very rows, which nobody could write in advance: an upper bound for
+    any count card.
+    """
+    cell = dense_codes(pitcher, balls, strikes)
+    g = int(cell.max()) + 1
+    n = np.bincount(cell, minlength=g).astype(np.float64)
+    hard_n = np.bincount(cell, weights=hard.astype(np.float64), minlength=g)
+    tool_n = np.bincount(cell, weights=tool_ok.astype(np.float64), minlength=g)
+    bar_n = np.bincount(cell, weights=bar_ok.astype(np.float64), minlength=g)
+    keep = n >= MIN_CELL_LIFT
+    in_cells = keep[cell]
+    if not keep.any():
+        return None
+    oracle_n = np.maximum(hard_n, n - hard_n)
+    tot = n[keep].sum()
+
+    # Per count, over the qualifying cells only.
+    first = np.zeros(g, dtype=np.int64)
+    first[cell[::-1]] = np.arange(len(cell))[::-1]        # a row of each cell
+    cnt = balls[first] * 3 + strikes[first]
+    per_count = []
+    for c in np.unique(cnt[keep]):
+        m = keep & (cnt == c)
+        per_count.append({
+            "count": f"{int(c) // 3}-{int(c) % 3}", "n": int(n[m].sum()),
+            "model": float(tool_n[m].sum() / n[m].sum()),
+            "bar": float(bar_n[m].sum() / n[m].sum()),
+            "oracle": float(oracle_n[m].sum() / n[m].sum()),
+        })
+    return {
+        "cells": int(keep.sum()), "n": int(tot), "in_cells": in_cells,
+        "model": float(tool_n[keep].sum() / tot),
+        "bar": float(bar_n[keep].sum() / tot),
+        "oracle": float(oracle_n[keep].sum() / tot),
+        "cells_won": float((tool_n[keep] / n[keep] > bar_n[keep] / n[keep]).mean()),
+        "per_count": per_count,
+    }
+
+
 def main():
-    import tensorflow as tf
+    ap = argparse.ArgumentParser(description="The product gate.")
+    ap.add_argument("--data-dir", type=Path, default=DATA_DIR,
+                    help="dataset to score (default: data_v5)")
+    ap.add_argument("--test-season", type=int, default=None,
+                    help="score this season ONCE with temperature, threshold "
+                         "and bar locked on the validation season")
+    ap.add_argument("--skip-reproduce", action="store_true",
+                    help="skip re-deriving the previously published number "
+                         "(saves one prediction pass)")
+    args = ap.parse_args()
+    data_dir = args.data_dir.resolve()
 
     lines = []
     out = lines.append
 
-    with open(DATA_DIR / "meta_v5.json") as f:
-        meta = json.load(f)
+    meta = json.loads((data_dir / "meta_v5.json").read_text())
     classes = meta["pitch_classes"]
     K = len(classes)
     fam = np.array([1 if c in FASTBALL_FAMILY else 0 for c in classes])
 
     print("Loading arrays...")
-    X = {k: np.load(DATA_DIR / f"X_{k}.npy") for k in
-         ["seq", "ctx", "pitcher_id", "batter_id", "pitcher_hand",
-          "batter_hand", "park_id", "catcher_id", "arsenal_mask"]}
-    y = np.load(DATA_DIR / "y_labels.npy")
+    X = load_inputs(data_dir)
+    y = np.load(data_dir / "y_labels.npy")
+    seasons = np.load(data_dir / "X_season.npy")
+    rm = load_row_meta(data_dir)
+    if rm is None:
+        raise SystemExit(
+            f"{data_dir.name}/ has no row_meta_v5.npz, so a live scouting table "
+            f"cannot be built for it: the raw pitcher id and integer count per "
+            f"row are missing. Extend it without refitting anything:\n\n"
+            f"    .venv/bin/python 02_preprocess.py --freeze-from {data_dir.name} "
+            f"--out-dir data_ext\n"
+            f"    .venv/bin/python analyze_actionability.py --data-dir data_ext\n")
+    if meta.get("verified_against_frozen") is False:
+        print("WARNING: this dataset did NOT reproduce the one it was extended "
+              "from. Treat every number below as unverified.")
 
-    idx_tr, idx_val, split_desc = load_split(y)
-    print(f"Split: {split_desc}   Validation rows: {len(idx_val):,}")
+    split = read_split(data_dir)
+    idx_tr, idx_val, split_desc = load_split(y, data_dir)
+    holdout = int(split.get("holdout_season", 0)) if split.get("mode") == "temporal" else None
+    if args.test_season is not None:
+        if holdout is None:
+            raise SystemExit("--test-season needs a model trained with a temporal "
+                             "split: on a random split every season is part training data.")
+        if args.test_season <= holdout:
+            raise SystemExit(f"--test-season must be later than the validation "
+                             f"season ({holdout}); {args.test_season} was used to "
+                             f"train or tune this model.")
+        idx_test = np.flatnonzero(seasons == args.test_season)
+        if len(idx_test) == 0:
+            raise SystemExit(f"no rows for season {args.test_season} in {data_dir.name}/ — "
+                             f"seasons present: {sorted(set(seasons.tolist()))}")
+    print(f"Split: {split_desc}   train {len(idx_tr):,}   validation {len(idx_val):,}"
+          + (f"   test {len(idx_test):,}" if args.test_season else ""))
 
-    print("Loading model and predicting...")
-    model = tf.keras.models.load_model(
-        DATA_DIR / "best_model_v5.keras", compile=False)
-    probs = model.predict(
-        [X[k][idx_val] for k in
-         ["seq", "ctx", "pitcher_id", "batter_id", "pitcher_hand",
-          "batter_hand", "park_id", "catcher_id", "arsenal_mask"]],
-        batch_size=2048, verbose=0)
+    pitcher = rm["pitcher"]
+    balls = rm["balls"].astype(np.int64)
+    strikes = rm["strikes"].astype(np.int64)
+    game = rm["game_pk"]
+    side = np.asarray(X["batter_hand"])
+    pid_enc = np.asarray(X["pitcher_id"])
+    hard = fam[y]
 
-    yv = y[idx_val]
-    pid = X["pitcher_id"][idx_val]
+    print("Building the causal arsenal mask and the live scouting tables...")
+    mask, mask_desc = scoring_mask(pid_enc, y, idx_tr, K, rm)
+    scout = live_scout(pitcher, balls, strikes, side, seasons, hard)
+    train_only = build_arsenal_mask(pid_enc, y, idx_tr, K)[pid_enc]
 
-    # Focal loss leaves the model under-confident, which pushes pitches it
-    # actually knows below the commit threshold. Fit T on the first half,
-    # apply to all; one parameter, but keep the split honest anyway.
-    raw_probs = probs
-    half = len(yv) // 2
-    temp, _ = fit_temperature(probs[:half], yv[:half])
-    probs = apply_temperature(probs, temp)
+    print("Loading the model (NumPy, no TensorFlow)...")
+    model = load_scoring_model(data_dir)
+    # Ids with an embedding row but no training rows behind it (anyone who
+    # debuted in the held-out season) go to the unknown bucket.
+    known = known_ids(X, idx_tr)
+    id_cols = {k: np.asarray(X[k]) for k in known}
 
-    pred = probs.argmax(1)
-    conf = probs.max(1)
-    N = len(yv)
+    def never_trained(rows):
+        """Share of `rows` carrying an id the model never trained on."""
+        return {k: float(((lut[id_cols[k][rows]] == 0) & (id_cols[k][rows] != 0)).mean())
+                for k, lut in known.items()}
 
-    # Binary "gear up vs stay back" — the decision a hitter actually makes.
-    p_hard = probs[:, fam == 1].sum(1)
-    hard_true = fam[yv]
-    hard_pred = (p_hard >= 0.5).astype(int)
-    hard_conf = np.maximum(p_hard, 1 - p_hard)
+    def evaluate(rows, label, temp=None):
+        """Score one season. Fits the temperature on its first half unless
+        one is passed in, in which case nothing at all is fitted."""
+        raw = predict_rows(model, X, rows, mask[rows], label=label, known=known)
+        yv = y[rows]
+        if temp is None:
+            half = len(yv) // 2
+            temp, _ = fit_temperature(raw[:half], yv[:half])
+        probs = apply_temperature(raw, temp)
+        p_hard, call, conf = binary_read(probs, fam)
+        ht = hard[rows].astype(bool)
+        tables = {name: (scout[name][rows] >= 0.5) == ht for name, _ in SCOUT_RUNGS}
+        tables["frozen"] = old_bar_lean(pid_enc, balls, strikes, hard, idx_tr, rows) == ht
+        return {
+            "rows": rows, "raw": raw, "probs": probs, "temp": float(temp),
+            "yv": yv, "hard_true": ht, "call": call, "conf": conf,
+            "tool_ok": call == ht, "tables": tables,
+            "mix_ok": (scout["pitcher"][rows] >= 0.5) == ht,
+            "clusters": [game[rows], pitcher[rows]],
+        }
 
-    # Pitcher's own base rate, from training rows only — what a scouting
-    # report already tells the hitter. Any value we add must beat this.
-    n_pid = int(max(X["pitcher_id"].max(), 0)) + 1
-    counts = np.zeros((n_pid, K))
-    np.add.at(counts, (X["pitcher_id"][idx_tr], y[idx_tr]), 1.0)
-    league = np.bincount(y[idx_tr], minlength=K).astype(float)
-    league /= league.sum()
-    totals = counts.sum(1, keepdims=True)
-    prior = _smoothed(counts, totals, league)[X["pitcher_id"][idx_val]]
-    prior_pred = prior.argmax(1)
-    prior_hard = (prior[:, fam == 1].sum(1) >= 0.5).astype(int)
+    val = evaluate(idx_val, "validation")
 
-    hdr(out, "0. CALIBRATION FIX")
-    out(f"Fitted temperature T = {temp:.3f} "
-        f"({'sharpened' if temp < 1 else 'softened'}).")
-    raw_hard = raw_probs[:, fam == 1].sum(1)
-    raw_conf = np.maximum(raw_hard, 1 - raw_hard)
-    cal_hard = probs[:, fam == 1].sum(1)
-    cal_conf = np.maximum(cal_hard, 1 - cal_hard)
+    # -----------------------------------------------------------------
+    hdr(out, "0. HOW THIS WAS MEASURED")
+    out(f"Model split        : {split_desc}")
+    out(f"Validation season  : {len(idx_val):,} pitches"
+        + (f"   |   test season {args.test_season}: {len(idx_test):,} pitches"
+           if args.test_season else ""))
+    out(f"Arsenal mask       : {mask_desc}")
+    out("Scouting tables    : live — built only from pitches before the one judged")
+    out("")
+    lbl = y[idx_val]
+    out("Pitches of a type outside the pitcher's mask (the model cannot call them):")
+    out(f"  mask frozen at the end of training : "
+        f"{(train_only[idx_val, lbl] == 0).mean():.2%}")
+    out(f"  causal mask (used here)            : "
+        f"{(mask[idx_val, lbl] == 0).mean():.2%}")
+    out("")
+    out("Pitches carrying an id the model never trained on. Each has an")
+    out("embedding row that was never updated, so it is sent to the unknown")
+    out("bucket the model WAS trained with:")
+    nt_val = never_trained(idx_val)
+    out("  " + "   ".join(f"{k.replace('_id', '')} {v:.1%}" for k, v in nt_val.items()))
+
+    # -----------------------------------------------------------------
+    # The bar is the strongest table ON THE VALIDATION SEASON, and is
+    # then locked, exactly as the model's threshold is. Choosing it on the
+    # test season would be selection too, even in the table's favour.
+    overall = {name: float(ok.mean()) for name, ok in val["tables"].items()}
+    bar = max((name for name, _ in SCOUT_RUNGS), key=lambda k: overall[k])
+    bar_label = dict(SCOUT_RUNGS)[bar]
+
+    val_slice = slice_rows(val["conf"], val["tool_ok"], val["tables"])
+    eligible = [r for r in val_slice if r["coverage"] >= MIN_COVERAGE]
+    chosen = max(eligible, key=lambda r: r["tool"] - r[bar]) if eligible else None
+
+    # -----------------------------------------------------------------
+    hdr(out, "A. WHAT THE CORRECTIONS CHANGE")
+    published, already_fair = None, False
+    pub_path = data_dir / "product_claim_v5.published.json"
+    if pub_path.exists():
+        pub = json.loads(pub_path.read_text())
+        # A schema-2 claim was written by THIS gate: it is already measured
+        # the fair way and there is no old number to explain.
+        already_fair = int(pub.get("schema", 1)) >= 2
+        published = pub.get("recommended") or None
+    old = None
+    if not args.skip_reproduce and holdout is not None and not already_fair:
+        print("Re-deriving the previously published number (old mask, frozen table)...")
+        half = len(idx_val) // 2
+
+        def as_before(mask_rows, label):
+            """One pass the way the old gate fed the model: ids untouched."""
+            raw = predict_rows(model, X, idx_val, mask_rows, label=label)
+            t, _ = fit_temperature(raw[:half], y[idx_val][:half])
+            _, call, conf = binary_read(apply_temperature(raw, t), fam)
+            return float(t), conf, call == val["hard_true"]
+
+        leaky = full_mask_through(pitcher, y, seasons, holdout, K)
+        t_old, conf_old, ok_old = as_before(leaky[idx_val], "old mask")
+        rows_old = [r for r in slice_rows(conf_old, ok_old, {"frozen": val["tables"]["frozen"]})
+                    if r["coverage"] >= MIN_COVERAGE]
+        if rows_old:
+            best_old = max(rows_old, key=lambda r: r["tool"] - r["frozen"])
+            old = {"temp": t_old, "conf": conf_old, "ok": ok_old, **best_old}
+            # The causal mask alone, ids still untouched, so the two
+            # corrections to the model's inputs can be told apart.
+            _, conf_mid, ok_mid = as_before(mask[idx_val], "causal mask only")
+    if old:
+        out("The number on the site was produced by the old gate. Re-derived here")
+        out("from the same model, to check nothing else moved:")
+        out("")
+        out(f"{'':<22}{'speaks on':>11}{'tool':>8}{'table':>8}{'edge':>8}")
+        if published:
+            out(f"{'published':<22}{published['coverage']:>11.1%}"
+                f"{published['tool_accuracy']:>8.1%}{published['table_accuracy']:>8.1%}"
+                f"{published['edge']:>+8.1%}")
+        out(f"{'re-derived':<22}{old['coverage']:>11.1%}{old['tool']:>8.1%}"
+            f"{old['frozen']:>8.1%}{old['tool'] - old['frozen']:>+8.1%}"
+            f"   (threshold {old['threshold']:.0%}, T {old['temp']:.3f})")
+        out("")
+        out(f"Each correction in turn, all at that same {old['threshold']:.0%} threshold:")
+        out("")
+        out(f"{'':<50}{'speaks on':>10}{'tool':>8}{'table':>8}{'edge':>8}")
+
+        def step(label, conf, ok, table_ok):
+            sel = conf >= old["threshold"]
+            if not sel.any():
+                return
+            out(f"{label:<50}{sel.mean():>10.1%}{ok[sel].mean():>8.1%}"
+                f"{table_ok[sel].mean():>8.1%}{ok[sel].mean() - table_ok[sel].mean():>+8.1%}")
+
+        frozen_ok = val["tables"]["frozen"]
+        step("old gate: mask from the future, frozen table", old["conf"], old["ok"], frozen_ok)
+        step("+ causal mask (model stops seeing the future)", conf_mid, ok_mid, frozen_ok)
+        step("+ never-trained ids sent to the unknown bucket", val["conf"], val["tool_ok"], frozen_ok)
+        for name, label in SCOUT_RUNGS:
+            step("+ " + label, val["conf"], val["tool_ok"], val["tables"][name])
+        out("")
+        out("The first three rows change what the MODEL is given; the rest change")
+        out("what the TABLE is given. Read down the 'edge' column: the drop across")
+        out("the table rows is how much of the old number was the model holding")
+        out("information the table had been denied.")
+    elif already_fair:
+        out("(nothing to reproduce — the claim this dataset was extended from was")
+        out(" already measured with a causal mask against a live table)")
+    elif args.skip_reproduce:
+        out("(skipped: --skip-reproduce)")
+    else:
+        out("(skipped — there is no earlier number to reproduce for a random split)")
+
+    # -----------------------------------------------------------------
+    hdr(out, "B. CALIBRATION")
+    out(f"Fitted temperature T = {val['temp']:.3f} "
+        f"({'sharpened' if val['temp'] < 1 else 'softened'}), on the first half of "
+        f"the validation season.")
+    _, _, raw_conf = binary_read(val["raw"], fam)
     out("")
     out(f"{'commit @':>10}{'raw':>12}{'calibrated':>14}{'change':>10}")
     for t in COMMIT_THRESHOLDS:
         out(f"{t:>10.0%}{(raw_conf >= t).mean():>12.1%}"
-            f"{(cal_conf >= t).mean():>14.1%}"
-            f"{(cal_conf >= t).mean() - (raw_conf >= t).mean():>+10.1%}")
-    out("")
-    out("More pitches clearing the bar means more situations where the")
-    out("hitter gets advice — for free, with no retraining.")
+            f"{(val['conf'] >= t).mean():>14.1%}"
+            f"{(val['conf'] >= t).mean() - (raw_conf >= t).mean():>+10.1%}")
+
+    probs, yv = val["probs"], val["yv"]
+    pred, top = probs.argmax(1), probs.max(1)
+    N = len(yv)
 
     hdr(out, "1. CONFIDENCE STRATIFICATION — where is the read strong?")
     out("Binned by the model's top probability. 'hard/soft' is the binary")
-    out("gear-up decision; that is the one a hitter can actually act on.")
+    out("gear-up decision; 'his mix' is just sitting on whichever side this")
+    out("pitcher throws more, ignoring the count.")
     out("")
     out(f"{'confidence':>12}{'pitches':>10}{'% of all':>10}"
-        f"{'10-cls acc':>12}{'hard/soft':>11}{'prior h/s':>11}{'edge':>8}")
+        f"{'10-cls acc':>12}{'hard/soft':>11}{'his mix':>10}{'edge':>8}")
     for lo, hi in zip(CONF_BINS[:-1], CONF_BINS[1:]):
-        m = (conf >= lo) & (conf < hi)
+        m = (top >= lo) & (top < hi)
         if m.sum() == 0:
             continue
-        a10 = (pred[m] == yv[m]).mean()
-        ahs = (hard_pred[m] == hard_true[m]).mean()
-        phs = (prior_hard[m] == hard_true[m]).mean()
-        out(f"{f'{lo:.1f}-{hi:.1f}':>12}{m.sum():>10,}{m.sum()/N:>10.1%}"
-            f"{a10:>12.1%}{ahs:>11.1%}{phs:>11.1%}{ahs - phs:>+8.1%}")
+        ahs, phs = val["tool_ok"][m].mean(), val["mix_ok"][m].mean()
+        out(f"{f'{lo:.1f}-{hi:.1f}':>12}{m.sum():>10,}{m.sum() / N:>10.1%}"
+            f"{(pred[m] == yv[m]).mean():>12.1%}{ahs:>11.1%}{phs:>10.1%}{ahs - phs:>+8.1%}")
 
     hdr(out, "2. CALIBRATION — is the confidence honest?")
     out("A hitter can only act on a number that means what it says.")
-    out("'predicted' vs 'actual' should track closely.")
     out("")
     out(f"{'bin':>12}{'n':>10}{'predicted':>12}{'actual':>10}{'gap':>9}")
     for lo, hi in zip(CONF_BINS[:-1], CONF_BINS[1:]):
-        m = (conf >= lo) & (conf < hi)
+        m = (top >= lo) & (top < hi)
         if m.sum() == 0:
             continue
-        out(f"{f'{lo:.1f}-{hi:.1f}':>12}{m.sum():>10,}{conf[m].mean():>12.1%}"
-            f"{(pred[m] == yv[m]).mean():>10.1%}"
-            f"{(pred[m] == yv[m]).mean() - conf[m].mean():>+9.1%}")
+        act = (pred[m] == yv[m]).mean()
+        out(f"{f'{lo:.1f}-{hi:.1f}':>12}{m.sum():>10,}{top[m].mean():>12.1%}"
+            f"{act:>10.1%}{act - top[m].mean():>+9.1%}")
 
-    hdr(out, "3. THE COMMIT SLICE — the headline number")
-    out("If we only advise when the binary read clears a threshold, how")
-    out("often do we speak, and how right are we when we do?")
+    hdr(out, "3. THE COMMIT SLICE vs HIS OVERALL MIX — a diagnostic, not the claim")
+    out("'His mix' ignores the count, which every hitter reads off a scouting")
+    out("report. Beating it proves little. Section 6 carries the real bar.")
     out("")
-    out(f"{'threshold':>11}{'% advised':>12}{'accuracy':>11}"
-        f"{'prior acc':>11}{'edge':>8}{'verdict':>22}")
-    best = None
+    out(f"{'threshold':>11}{'% advised':>12}{'accuracy':>11}{'his mix':>10}{'edge':>8}")
     for t in COMMIT_THRESHOLDS:
-        m = hard_conf >= t
+        m = val["conf"] >= t
         if m.sum() == 0:
-            out(f"{t:>11.0%}{0:>12.1%}{'—':>11}{'—':>11}{'—':>8}")
             continue
-        acc = (hard_pred[m] == hard_true[m]).mean()
-        pacc = (prior_hard[m] == hard_true[m]).mean()
-        share = m.mean()
-        edge = acc - pacc
-        ok = share >= MIN_SHARE and acc >= MIN_ACC and edge >= MIN_EDGE
-        why = "ACTIONABLE" if ok else (
-            "no edge vs scouting" if edge < MIN_EDGE else
-            "too rare" if share < MIN_SHARE else "not accurate enough")
-        # Keep the widest qualifying slice, then the best edge among those.
-        if ok and (best is None or edge > best[3]):
-            best = (t, share, acc, edge)
-        out(f"{t:>11.0%}{share:>12.1%}{acc:>11.1%}{pacc:>11.1%}"
-            f"{edge:>+8.1%}{why:>22}")
+        acc, pacc = val["tool_ok"][m].mean(), val["mix_ok"][m].mean()
+        out(f"{t:>11.0%}{m.mean():>12.1%}{acc:>11.1%}{pacc:>10.1%}{acc - pacc:>+8.1%}")
 
-    hdr(out, "4. COUNT-CONDITIONAL EDGE — where does it live?")
-    # balls/strikes are ctx columns 0 and 1, standardized; rank-order is
-    # preserved by StandardScaler so unique values recover the levels.
-    balls = X["ctx"][idx_val, 0]
-    strikes = X["ctx"][idx_val, 1]
-    b_lv = {v: i for i, v in enumerate(sorted(np.unique(balls)))}
-    s_lv = {v: i for i, v in enumerate(sorted(np.unique(strikes)))}
-    out("'naive' = just sit whichever side is commoner in that count —")
-    out("what every hitter already knows. THAT is the bar that matters.")
+    hdr(out, "4. BY COUNT — where does it live?")
+    out("'naive' = sit whichever side is commoner in that count across the")
+    out("league, which every hitter already knows.")
     out("")
-    out(f"{'count':>8}{'pitches':>10}{'model':>9}{'pitcher':>9}{'naive':>8}"
+    out(f"{'count':>8}{'pitches':>10}{'model':>9}{'his mix':>9}{'naive':>8}"
         f"{'vs naive':>10}{'%hard':>8}")
-    rows = []
-    for bv, bi in b_lv.items():
-        for sv, si in s_lv.items():
-            m = (balls == bv) & (strikes == sv)
+    bv, sv = balls[idx_val], strikes[idx_val]
+    by_count = []
+    for b in range(4):
+        for s in range(3):
+            m = (bv == b) & (sv == s)
             if m.sum() < 500:
                 continue
-            acc = (hard_pred[m] == hard_true[m]).mean()
-            pacc = (prior_hard[m] == hard_true[m]).mean()
-            share = hard_true[m].mean()
-            naive = max(share, 1 - share)   # always sit the count majority
-            rows.append((f"{bi}-{si}", int(m.sum()), acc, pacc, naive,
-                         acc - naive, share))
-    for r in sorted(rows, key=lambda r: -r[5]):
-        out(f"{r[0]:>8}{r[1]:>10,}{r[2]:>9.1%}{r[3]:>9.1%}{r[4]:>8.1%}"
-            f"{r[5]:>+10.1%}{r[6]:>8.1%}")
-    out("")
-    best_counts = [r for r in sorted(rows, key=lambda r: -r[5])[:3]]
-    out("Strongest counts vs what the hitter already knows: "
-        + ", ".join(f"{r[0]} ({r[5]:+.1%})" for r in best_counts))
+            share = val["hard_true"][m].mean()
+            acc = val["tool_ok"][m].mean()
+            by_count.append((f"{b}-{s}", int(m.sum()), acc, val["mix_ok"][m].mean(),
+                             max(share, 1 - share), share))
+    for c, n, acc, mix, naive, share in sorted(by_count, key=lambda r: -(r[2] - r[4])):
+        out(f"{c:>8}{n:>10,}{acc:>9.1%}{mix:>9.1%}{naive:>8.1%}"
+            f"{acc - naive:>+10.1%}{share:>8.1%}")
 
-    hdr(out, "5. WITHIN-SITUATION LIFT — can a static card ever capture this?")
-    out("For each (pitcher, count) cell, compare the model's VARYING call")
-    out("against the best possible CONSTANT rule for that cell — i.e. the")
-    out("strongest scouting report anyone could write, scored on the same")
-    out("held-out pitches it is being graded against (generous to the bar).")
-    out("")
-    out("If the model wins here, its edge is WITHIN situations, and no")
-    out("memorizable card can carry it — the product must be a live lookup.")
-    out("")
-    # `balls`/`strikes` hold STANDARDIZED values here; map to 0..3 levels
-    # before comparing, or nothing ever matches.
-    balls_i = np.array([b_lv[v] for v in balls])
-    strikes_i = np.array([s_lv[v] for v in strikes])
+    def across_all(ev):
+        """Section 5 for one season: model vs the locked bar in every
+        situation, with a clustered interval on the lift."""
+        r = ev["rows"]
+        cs = cell_summary(pitcher[r], balls[r], strikes[r], ev["hard_true"],
+                          ev["tool_ok"], ev["tables"][bar])
+        if cs is None:
+            return None
+        lo, hi = widest_ci(ev["clusters"], cs["in_cells"], ev["tool_ok"],
+                           ev["tables"][bar], n_boot=N_BOOT)
+        cs["lift"], cs["ci"] = cs["model"] - cs["bar"], [lo, hi]
+        cs["verdict"] = "ahead" if lo > 0 else "behind" if hi < 0 else "level"
+        return cs
 
-    # Two constant rules to beat:
-    #  - "scout": derived from TRAINING rows, scored on validation. This is
-    #    the fair, out-of-sample bar and the one a real report would give.
-    #  - "oracle": the best constant rule fitted on the validation rows
-    #    themselves. Nobody could write it in advance; it is an upper
-    #    bound, and losing to it slightly is not a failure.
-    n_pid_a = int(X["pitcher_id"].max()) + 1
-    nb, ns_ = max(b_lv.values()) + 1, max(s_lv.values()) + 1
-    bt = np.array([b_lv[v] for v in X["ctx"][idx_tr, 0]])
-    st = np.array([s_lv[v] for v in X["ctx"][idx_tr, 1]])
-    ht = fam[y[idx_tr]]
-    ch = np.zeros((n_pid_a, nb, ns_))
-    ct = np.zeros((n_pid_a, nb, ns_))
-    np.add.at(ch, (X["pitcher_id"][idx_tr], bt, st), ht)
-    np.add.at(ct, (X["pitcher_id"][idx_tr], bt, st), 1.0)
-
-    tot_n = tot_model = tot_const = tot_scout = 0
-    cell_wins = cell_total = 0
-    per_count = {}
-    for p in np.unique(X["pitcher_id"][idx_val]):
-        if p == 0:
-            continue
-        pm = pid == p
-        for b in range(max(b_lv.values()) + 1):
-            for s in range(max(s_lv.values()) + 1):
-                m = pm & (balls_i == b) & (strikes_i == s)
-                n = int(m.sum())
-                if n < MIN_CELL_LIFT:
-                    continue
-                share = hard_true[m].mean()
-                const = max(share, 1 - share)          # oracle static rule
-                mod = float((hard_pred[m] == hard_true[m]).mean())
-                # Scout: majority side learned from TRAINING rows only.
-                tt = ct[p, b, s]
-                rate = (ch[p, b, s] / tt) if tt >= 40 else share
-                scout_lean = int(rate >= 0.5)
-                scout = float((hard_true[m] == scout_lean).mean())
-                tot_n += n
-                tot_model += mod * n
-                tot_const += const * n
-                tot_scout += scout * n
-                cell_total += 1
-                cell_wins += int(mod > scout)
-                k = f"{b}-{s}"
-                a, c, sc, nn = per_count.get(k, (0.0, 0.0, 0.0, 0))
-                per_count[k] = (a + mod * n, c + const * n,
-                                sc + scout * n, nn + n)
-    if tot_n:
-        mm = tot_model / tot_n
-        cc = tot_const / tot_n
-        ss = tot_scout / tot_n
-        out(f"Cells with >={MIN_CELL_LIFT} held-out pitches: {cell_total:,} "
-            f"covering {tot_n:,} pitches")
-        out(f"  model (varying call)         {mm:.1%}")
-        out(f"  scout constant (from train)  {ss:.1%}   <- the fair bar")
-        out(f"  oracle constant (fit on val) {cc:.1%}   <- upper bound")
-        out(f"  LIFT vs scout                {mm - ss:+.1%}")
-        out(f"  gap to oracle                {mm - cc:+.1%}")
-        out(f"  cells where model beats scout {cell_wins}/{cell_total} "
-            f"({cell_wins/max(cell_total,1):.0%})")
-        se = np.sqrt(0.25 / tot_n)
-        out(f"  (a +/-{1.96*se:.2%} band is noise at this sample size)")
+    hdr(out, "5. ACROSS ALL SITUATIONS — better everywhere, or only when it speaks?")
+    out(f"The bar: {bar_label}.")
+    out("It was the strongest table across the whole validation season:")
+    for name, label in SCOUT_RUNGS:
+        out(f"  {overall[name]:.1%}  {label}" + ("   <- the bar" if name == bar else ""))
+    out(f"  {overall['frozen']:.1%}  count table frozen at the end of training (the old bar)")
+    out(f"  {val['tool_ok'].mean():.1%}  the model, calling every pitch")
+    out("")
+    cs_val = across_all(val)
+    if cs_val:
+        out(f"Every (pitcher, count) situation with >={MIN_CELL_LIFT} held-out pitches: "
+            f"{cs_val['cells']:,} situations, {cs_val['n']:,} pitches")
+        out(f"  model                         {cs_val['model']:.1%}")
+        out(f"  the bar                       {cs_val['bar']:.1%}")
+        out(f"  best fixed call per situation {cs_val['oracle']:.1%}   <- hindsight; an upper bound for a count card")
+        out(f"  LIFT vs the bar               {cs_val['lift']:+.1%}   "
+            f"95% CI [{cs_val['ci'][0]:+.1%}, {cs_val['ci'][1]:+.1%}]")
+        out(f"  situations where the model wins  {cs_val['cells_won']:.0%}")
         out("")
-        out(f"{'count':>8}{'pitches':>10}{'model':>9}{'scout':>9}"
-            f"{'lift':>8}{'oracle':>9}")
-        for k, (a, c, sc, nn) in sorted(
-                per_count.items(), key=lambda kv: -(kv[1][0] - kv[1][2])):
-            out(f"{k:>8}{nn:>10,}{a/nn:>9.1%}{sc/nn:>9.1%}"
-                f"{(a-sc)/nn:>+8.1%}{c/nn:>9.1%}")
+        out(f"{'count':>8}{'pitches':>10}{'model':>9}{'bar':>9}{'lift':>8}{'hindsight':>11}")
+        for pc in sorted(cs_val["per_count"], key=lambda d: -(d["model"] - d["bar"])):
+            out(f"{pc['count']:>8}{pc['n']:>10,}{pc['model']:>9.1%}{pc['bar']:>9.1%}"
+                f"{pc['model'] - pc['bar']:>+8.1%}{pc['oracle']:>11.1%}")
         out("")
-        # An aggregate lift can be positive while the model loses in most
-        # cells — it just wins bigger where it wins. For the edge to be
-        # genuinely WITHIN-situation it must also (a) win in more than
-        # half the cells and (b) beat the best constant rule, not merely
-        # match it. Matching the oracle means the model is only picking
-        # the right constant, which a table can do just as well.
-        win_rate = cell_wins / max(cell_total, 1)
-        beats_scout = mm - ss > 1.96 * se
-        beats_oracle = mm - cc > 1.96 * se
-        broad = win_rate > 0.50
-        s5_verdict = ("POSITIVE" if (beats_scout and broad and beats_oracle)
-                      else "NEGATIVE" if mm - ss < -1.96 * se
-                      else "WEAK")
-        s5_lift = mm - ss
-        if beats_scout and broad and beats_oracle:
-            out("POSITIVE within-situation lift: the model knows things a")
-            out("static card cannot carry. Build a LIVE lookup, not a card.")
-        elif beats_scout and not broad:
-            out(f"NOT BROAD: aggregate lift is +{mm-ss:.1%} but the model beats")
-            out(f"the scouting table in only {win_rate:.0%} of situations — it")
-            out("wins bigger where it wins and loses elsewhere. That is not a")
-            out("dependable per-situation edge.")
-            out("")
-            out("SHIP THE TABLE, built from the model's per-cell call rather")
-            out("than from raw frequencies — that is where the lift lives, and")
-            out("it needs no model at serve time.")
-        elif beats_scout and not beats_oracle:
-            out(f"AT ORACLE PARITY: the model matches the best CONSTANT rule")
-            out(f"per situation ({mm - cc:+.1%} vs oracle) but does not exceed")
-            out("it, so its within-situation variation adds nothing a table")
-            out("cannot encode. Ship the table.")
-        elif mm - ss < -1.96 * se:
-            out("NEGATIVE: a constant per-situation rule beats the model.")
-            out("Ship the scouting table; the network is not earning its keep.")
-        else:
-            out("FLAT: the model matches a good static table. Ship the table —")
-            out("it is simpler, needs no model at serve time, and is honest.")
-        out("")
-        out("NOTE: sections 1-4 compare against the pitcher's OVERALL mix,")
-        out("which ignores the count. This section's 'scout' bar is")
-        out("count-split. The difference between the two is how much of the")
-        out("headline edge is just 'the model knows about counts' — which a")
-        out("hitter already does.")
+        out({"ahead": "The model is AHEAD of the table across all situations, not only on its confident slice.",
+             "level": "Across all situations the model and the table cannot be told apart.",
+             "behind": "Across all situations the TABLE is ahead. Any value is confined to the confident slice."}
+            [cs_val["verdict"]])
     else:
-        out(f"No cell had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
-        s5_verdict, s5_lift = "UNMEASURED", 0.0
+        out(f"No situation had >={MIN_CELL_LIFT} held-out pitches — cannot measure.")
 
-    hdr(out, "6. THE PRODUCT CLAIM — what goes on the site")
-    out("Sections 3-5 are model diagnostics. This is the sentence a hitter")
-    out("is actually promised: when the tool SPEAKS, how often is it right,")
-    out("and how often would his count-split scouting table have been right")
-    out("on those same pitches?")
+    hdr(out, "6. THE PRODUCT CLAIM")
+    out("When the tool SPEAKS, how often is it right — and how often would each")
+    out("scouting table have been right on those same pitches?")
     out("")
     out("The advised pitches are chosen by the model, so this is not a fair")
-    out("model-vs-table comparison — but it IS the product's real claim,")
-    out("because staying silent the rest of the time is part of the design.")
+    out("fight across all pitches (section 5 is). It IS the product's claim,")
+    out("because staying silent the rest of the time is the design.")
     out("")
-    # Per-row scout lean, from the same training count-split table.
-    scout_lean_row = np.zeros(len(yv), dtype=int)
-    for b in range(nb):
-        for s in range(ns_):
-            sel = (balls_i == b) & (strikes_i == s)
-            if not sel.any():
-                continue
-            tt = ct[pid[sel], b, s]
-            rt = np.where(tt >= 40, ch[pid[sel], b, s] / np.maximum(tt, 1),
-                          hard_true[sel].mean())
-            scout_lean_row[sel] = (rt >= 0.5).astype(int)
-    out(f"{'commit @':>10}{'speaks on':>12}{'tool':>8}{'table':>8}"
-        f"{'edge':>8}")
-    for t in COMMIT_THRESHOLDS:
-        sel = cal_conf >= t
-        if sel.sum() == 0:
-            continue
-        tool = float((hard_pred[sel] == hard_true[sel]).mean())
-        tab = float((scout_lean_row[sel] == hard_true[sel]).mean())
-        out(f"{t:>10.0%}{sel.mean():>12.1%}{tool:>8.1%}{tab:>8.1%}"
-            f"{tool - tab:>+8.1%}")
+    head = f"{'commit @':>9}{'speaks on':>11}{'tool':>8}{'frozen':>9}"
+    head += "".join(f"{n.replace('live_side_season', 'season').replace('live_side', 'side'):>8}"
+                    for n, _ in SCOUT_RUNGS)
+    out(head + f"{'edge':>9}")
+    for r in val_slice:
+        line = (f"{r['threshold']:>9.0%}{r['coverage']:>11.1%}{r['tool']:>8.1%}"
+                f"{r['frozen']:>9.1%}")
+        line += "".join(f"{r[n]:>8.1%}" for n, _ in SCOUT_RUNGS)
+        out(line + f"{r['tool'] - r[bar]:>+9.1%}"
+            + ("   <- chosen" if chosen and r["threshold"] == chosen["threshold"] else ""))
     out("")
-    s6 = []
-    for t in COMMIT_THRESHOLDS:
-        sel = cal_conf >= t
-        if sel.sum() == 0 or sel.mean() < MIN_COVERAGE:
-            continue
-        s6.append((t, float(sel.mean()),
-                   float((hard_pred[sel] == hard_true[sel]).mean()),
-                   float((scout_lean_row[sel] == hard_true[sel]).mean())))
-    out("Read the chosen row as: \"on X% of pitches the tool gives you a")
-    out("read; it is right A% of the time, where your scouting table would")
-    out("have been right B%.\"")
+    out("  frozen = count table frozen at the end of training (the old bar)")
+    out("  live   = count table, kept current      side = also split by batter side")
+    out("  season = also weighted to this season   edge = tool minus the bar "
+        f"('{bar.replace('live_side_season', 'season').replace('live_side', 'side')}')")
 
-    hdr(out, "VERDICT")
-    # Gated on the COUNT-SPLIT bar, never on section 3. Section 3 scores
-    # the model against the pitcher's overall mix, which ignores the
-    # count — a bar every hitter already clears from the scouting report.
-    # Keying the verdict to it once printed ACTIONABLE in the same report
-    # where section 5 printed NEGATIVE.
-    s6_best = max(s6, key=lambda r: r[2] - r[3]) if s6 else None
-    if s6_best:
-        t6, cov6, tool6, tab6 = s6_best
-        out(f"When it speaks (>={t6:.0%} confidence): {cov6:.1%} of pitches, "
-            f"{tool6:.1%} right,")
-        out(f"vs {tab6:.1%} for the count-split scouting table — "
-            f"{tool6 - tab6:+.1%}.")
-        out(f"Across ALL situations: {s5_lift:+.1%} vs that same table "
-            f"({s5_verdict}).")
+    def claim_at(ev, threshold):
+        """The claim numbers for one season at a fixed threshold."""
+        sel = ev["conf"] >= threshold
+        if sel.sum() == 0:
+            return None
+        lo, hi = widest_ci(ev["clusters"], sel, ev["tool_ok"], ev["tables"][bar],
+                           n_boot=N_BOOT)
+        tool, tab = float(ev["tool_ok"][sel].mean()), float(ev["tables"][bar][sel].mean())
+        return {"threshold": float(threshold), "coverage": float(sel.mean()),
+                "n_advised": int(sel.sum()), "tool_accuracy": tool,
+                "table_accuracy": tab, "edge": tool - tab, "edge_ci": [lo, hi],
+                "ladder": {name: float(ok[sel].mean()) for name, ok in ev["tables"].items()}}
+
+    val_claim = claim_at(val, chosen["threshold"]) if chosen else None
+
+    hdr(out, f"VERDICT ON THE VALIDATION SEASON{f' ({holdout})' if holdout else ''}")
+    if val_claim:
+        out(f"When it speaks (>={val_claim['threshold']:.0%} confidence): "
+            f"{val_claim['coverage']:.1%} of pitches, {val_claim['tool_accuracy']:.1%} right,")
+        out(f"vs {val_claim['table_accuracy']:.1%} for the bar — "
+            f"{val_claim['edge']:+.1%}  (95% CI [{val_claim['edge_ci'][0]:+.1%}, "
+            f"{val_claim['edge_ci'][1]:+.1%}]).")
         out("")
-    if s5_verdict == "POSITIVE" and s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE:
-        out("ACTIONABLE. The model beats the count-split scouting table both")
-        out("overall and on the slice where it speaks. Build the live lookup.")
-    elif s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE:
-        out("ACTIONABLE AS A SELECTIVE OVERLAY, NOT A REPLACEMENT.")
-        out("Across all situations a constant per-cell rule matches or beats")
-        out("the model, so this cannot be sold as 'better than a scouting")
-        out("report'. But on the pitches where it is confident it does beat")
-        out("that table, and staying silent elsewhere is the design.")
-        out("")
-        out("The claim must be scoped to the slice, and the site must show")
-        out("the coverage number next to the accuracy number. Quoting the")
-        out("accuracy alone would be dishonest.")
+        out("This threshold was CHOSEN on these pitches as the one with the best")
+        out("edge, so the figure flatters itself a little. It is a tuning result.")
+        if args.test_season is None:
+            out("Score a later season with --test-season for a number that is not.")
     else:
-        out("NOT ACTIONABLE against the bar that matters. The count-split")
-        out("scouting table is as good or better, both overall and on the")
-        out("confident slice. Game context is not adding what a hitter")
-        out("cannot already read off a table.")
+        out(f"No threshold advises on >={MIN_COVERAGE:.0%} of pitches. Nothing to claim.")
+
+    # -----------------------------------------------------------------
+    test_claim = cs_test = status = None
+    if args.test_season is not None and not val_claim:
+        # Nothing could be locked, so there is nothing to test. That is a
+        # failed test, not an absent one.
+        status = "not_confirmed"
+        hdr(out, "VERDICT ON THE CLEAN TEST")
+        out(f"NOT CONFIRMED: on the validation season no threshold advises on "
+            f">={MIN_COVERAGE:.0%} of pitches,")
+        out("so there was no setting to carry to the test season.")
+    if args.test_season is not None and val_claim:
+        test = evaluate(idx_test, f"test {args.test_season}", temp=val["temp"])
+        test_claim = claim_at(test, val_claim["threshold"])
+        cs_test = across_all(test)
+
+        hdr(out, f"7. CLEAN TEST — the {args.test_season} season")
+        out("Nothing was fitted or chosen on these pitches. Locked beforehand, on")
+        out(f"the {holdout} season:")
+        out(f"  temperature  {val['temp']:.3f}")
+        out(f"  threshold    {val_claim['threshold']:.0%}")
+        out(f"  the bar      {bar_label}")
         out("")
-        out("Pivot options, in order:")
-        out("  1. Ship the count-split table itself as pre-game scouting —")
-        out("     see section 4 for where the tendencies are actually sharp.")
-        out("  2. Narrow the claim to the confident slice and say so plainly,")
-        out("     if section 6's edge is positive but under the bar.")
-        out("  3. Re-check the arsenal mask is built from training rows only;")
-        out("     a leaky mask flatters the model against the table.")
+        lbl = y[idx_test]
+        out(f"Pitches of a type outside the causal mask: "
+            f"{(mask[idx_test, lbl] == 0).mean():.2%}   "
+            f"(frozen mask: {(train_only[idx_test, lbl] == 0).mean():.2%})")
+        nt_test = never_trained(idx_test)
+        out(f"Pitches from pitchers the model never trained on (no embedding, or one "
+            f"never updated): {(known['pitcher_id'][pid_enc[idx_test]] == 0).mean():.1%}")
+        out("  never-trained ids sent to the unknown bucket: "
+            + "   ".join(f"{k.replace('_id', '')} {v:.1%}" for k, v in nt_test.items()))
+        out("")
+        if test_claim:
+            out(f"{'':<14}{'speaks on':>11}{'tool':>8}{'bar':>8}{'edge':>8}   95% CI")
+            out(f"{'validation':<14}{val_claim['coverage']:>11.1%}"
+                f"{val_claim['tool_accuracy']:>8.1%}{val_claim['table_accuracy']:>8.1%}"
+                f"{val_claim['edge']:>+8.1%}   [{val_claim['edge_ci'][0]:+.1%}, "
+                f"{val_claim['edge_ci'][1]:+.1%}]")
+            out(f"{'TEST':<14}{test_claim['coverage']:>11.1%}"
+                f"{test_claim['tool_accuracy']:>8.1%}{test_claim['table_accuracy']:>8.1%}"
+                f"{test_claim['edge']:>+8.1%}   [{test_claim['edge_ci'][0]:+.1%}, "
+                f"{test_claim['edge_ci'][1]:+.1%}]")
+            out("")
+            out("On the advised pitches, each table in turn:")
+            out(f"  {test_claim['ladder']['frozen']:.1%}  frozen count table (the old bar)")
+            for name, label in SCOUT_RUNGS:
+                out(f"  {test_claim['ladder'][name]:.1%}  {label}"
+                    + ("   <- the bar" if name == bar else ""))
+            out(f"  {test_claim['tool_accuracy']:.1%}  the tool")
+        if cs_test:
+            out("")
+            out(f"Across all situations ({cs_test['cells']:,} with >={MIN_CELL_LIFT} pitches): "
+                f"model {cs_test['model']:.1%}, bar {cs_test['bar']:.1%}, "
+                f"lift {cs_test['lift']:+.1%}  [{cs_test['ci'][0]:+.1%}, {cs_test['ci'][1]:+.1%}], "
+                f"model wins {cs_test['cells_won']:.0%} of them.")
+
+        # Pre-registered in docs/EXPERIMENTS.md before any real test
+        # number existed. Do not adjust these after seeing one.
+        if not test_claim or test_claim["coverage"] < MIN_COVERAGE:
+            status = "not_confirmed"
+        elif test_claim["edge_ci"][0] > 0 and test_claim["edge"] >= MIN_EDGE:
+            status = "confirmed"
+        elif test_claim["edge_ci"][0] > 0:
+            status = "reduced"
+        else:
+            status = "not_confirmed"
+
+        hdr(out, "VERDICT ON THE CLEAN TEST")
+        if status == "confirmed":
+            out("CONFIRMED. On a season used for nothing else, the tool beats an")
+            out(f"up-to-date scouting table by {test_claim['edge']:+.1%} on the "
+                f"{test_claim['coverage']:.0%} of pitches where it speaks,")
+            out("and the interval excludes zero. That is the claim the site may make.")
+        elif status == "reduced":
+            out("REDUCED. The edge is real — the interval excludes zero — but at")
+            out(f"{test_claim['edge']:+.1%} it is under the {MIN_EDGE:.0%} bar set in advance.")
+            out("The site must show this smaller number, not the validation one.")
+        else:
+            why = ("it speaks on too few pitches" if not test_claim
+                   or test_claim["coverage"] < MIN_COVERAGE else
+                   "the interval on the edge includes zero")
+            out(f"NOT CONFIRMED: {why}.")
+            out("On a season used for nothing else, the tool is not shown to beat a")
+            out("scouting table that is kept up to date. The site must say so; it")
+            out("may not claim an edge.")
 
     text = "\n".join(lines)
     print(text)
-    REPORT_PATH.write_text(text + "\n")
+    report_path = data_dir / "actionability_report_v5.txt"
+    report_path.write_text(text + "\n")
 
-    # The site reads these rather than carrying hand-copied figures, so
-    # a stale or flattering number cannot survive a retrain. Every entry
-    # is measured on the held-out rows of the split the model was
-    # actually trained with.
+    # -----------------------------------------------------------------
+    # The site reads these rather than carrying hand-copied figures, so a
+    # stale or flattering number cannot survive a retrain. When a test
+    # season was scored, ITS numbers are the headline: they are the only
+    # ones nothing was tuned on.
+    headline, head_cells = (test_claim, cs_test) if args.test_season else (val_claim, cs_val)
+    if args.test_season:
+        measured = (f"trained through {holdout - 1}, tuned on {holdout}, "
+                    f"tested on {args.test_season}")
+        n_measured = int(len(idx_test))
+    else:
+        measured, n_measured = split_desc, int(len(idx_val))
+        status = "validation_only"
+    if holdout is None:
+        # A random split shares games and at-bats between train and
+        # validation. Its numbers are printed above as a diagnostic and
+        # are never handed to the site.
+        status, headline = "random_split", None
+        print("\nNOTE: this model was trained on a random split. No claim is "
+              "written for the site;\nretrain with --split temporal for a "
+              "number that can be published.")
+
+    def cells_json(cs):
+        return None if cs is None else {
+            "lift": cs["lift"], "ci": cs["ci"], "cells_won": cs["cells_won"],
+            "verdict": cs["verdict"], "model": cs["model"], "bar": cs["bar"]}
+
     claim = {
-        "split": split_desc,
-        "temperature": float(temp),
-        "n_val": int(len(yv)),
-        "section5_lift_vs_scout": float(s5_lift),
-        "section5_verdict": s5_verdict,
-        "slice": [
-            {"threshold": t, "coverage": cov, "tool_accuracy": tool,
-             "table_accuracy": tab, "edge": tool - tab}
-            for (t, cov, tool, tab) in s6
-        ],
-        "recommended": (
-            {"threshold": s6_best[0], "coverage": s6_best[1],
-             "tool_accuracy": s6_best[2], "table_accuracy": s6_best[3],
-             "edge": s6_best[2] - s6_best[3]} if s6_best else None),
-        "shippable": bool(s6_best and s6_best[2] - s6_best[3] >= MIN_EDGE),
+        "schema": 2,
+        "status": status,
+        "split": measured,
+        "model_split": split_desc,
+        "evaluated_season": args.test_season or holdout,
+        "n_val": n_measured,
+        "n_train": int(len(idx_tr)),
+        "train_through": (holdout - 1) if holdout else None,
+        "tuned_on": holdout,
+        "temperature": val["temp"],
+        # The confidence at which the site speaks: chosen on the validation
+        # season, and the one the headline numbers were measured at.
+        "threshold": val_claim["threshold"] if val_claim else None,
+        # The bundle builder refuses to pair this claim with any other
+        # weights: a claim for one model beside another's is a number
+        # nobody measured.
+        "model_sha256": hashlib.sha256(
+            (data_dir / "best_model_v5.keras").read_bytes()).hexdigest(),
+        "mask": mask_desc,
+        "baseline": bar,
+        "baseline_label": bar_label,
+        "baseline_plain": SCOUT_PLAIN[bar],
+        "min_edge": MIN_EDGE,
+        "min_coverage": MIN_COVERAGE,
+        "recommended": headline,
+        "overall": cells_json(head_cells),
+        "section5_lift_vs_scout": head_cells["lift"] if head_cells else 0.0,
+        "section5_verdict": head_cells["verdict"] if head_cells else "unmeasured",
+        "slice": [{"threshold": r["threshold"], "coverage": r["coverage"],
+                   "tool_accuracy": r["tool"], "table_accuracy": r[bar],
+                   "edge": r["tool"] - r[bar]} for r in val_slice],
+        "validation": {"season": holdout, "n": int(len(idx_val)),
+                       "recommended": val_claim, "overall": cells_json(cs_val)},
+        "shippable": bool(headline and headline["edge"] >= MIN_EDGE
+                          and headline["coverage"] >= MIN_COVERAGE
+                          and status in ("confirmed", "validation_only")),
     }
-    (DATA_DIR / "product_claim_v5.json").write_text(json.dumps(claim, indent=2))
-    print(f"\nProduct claim written to {DATA_DIR / 'product_claim_v5.json'}")
-    print(f"\nWritten to {REPORT_PATH}")
+    claim_path = data_dir / "product_claim_v5.json"
+    # Once a test number exists for this model, a tuning-season number
+    # must not replace it as the claim. Re-running the gate without
+    # --test-season is a look at the validation season, not a new result.
+    if status == "validation_only" and claim_path.exists():
+        prev = json.loads(claim_path.read_text())
+        if (prev.get("status") in ("confirmed", "reduced", "not_confirmed")
+                and prev.get("model_sha256") == claim["model_sha256"]):
+            print(f"\nKept the existing claim in {claim_path.name}: it was measured on "
+                  f"{prev.get('evaluated_season')}, a season nothing\nwas tuned on, and "
+                  f"a validation-season number does not replace that. (Pass "
+                  f"--test-season {prev.get('evaluated_season')} to re-measure it.)")
+            print(f"Written to {report_path}")
+            return
+    claim_path.write_text(json.dumps(claim, indent=2))
+    print(f"\nProduct claim written to {claim_path}")
+    print(f"Written to {report_path}")
 
 
 if __name__ == "__main__":

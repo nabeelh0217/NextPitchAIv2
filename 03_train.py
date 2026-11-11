@@ -116,7 +116,11 @@ HOLDOUT_SEASON = 2025
 # Second head: where the pitch goes (heart/shadow/chase/waste).
 # Location is far noisier than type - a pitcher aims and misses - so it
 # is weighted well below the type head and must never drag it down.
-ENABLE_LOCATION_HEAD = True
+# OFF by default: it failed its pre-registered criterion (run 9) and
+# costs the type head ~0.3 points (run 10). The shipping model has none.
+# The runners call this script with no flags, so the default has to be
+# the configuration of record. --location-head turns it back on.
+ENABLE_LOCATION_HEAD = False
 LOCATION_LOSS_WEIGHT = 0.3
 
 # Logit penalty for pitch types outside the pitcher's arsenal.
@@ -502,6 +506,7 @@ report = build_report(
     y_val, y_pred_probs,
     X_pitcher_id[idx_tr], y_tr,
     X_pitcher_id[idx_val], pitch_classes, hist_dict, SPLIT_DESC,
+    "ALL rows (LEAKY)" if FULL_ARSENAL_MASK else "training rows only",
 )
 if LOCATION_BLOCK:
     report = report + "\n\n" + LOCATION_BLOCK
