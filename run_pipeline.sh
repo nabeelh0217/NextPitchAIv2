@@ -11,6 +11,10 @@
 #      ./run_pipeline.sh --fresh             Redo every step, INCLUDING the
 #                                            30-90 min scrape
 #      ./run_pipeline.sh --setup-only        Just create .venv + install deps
+#      ./run_pipeline.sh --fresh-preprocess --fit-through=2025
+#                                            Rebuild + retrain, keeping every
+#                                            season after 2025 out of the fit
+#                                            so it stays a clean test season
 #
 #  Steps:
 #    1. Find a TensorFlow-compatible Python (3.10 - 3.13)
@@ -23,16 +27,18 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-usage() { sed -n '2,21p' "$0" | sed 's/^#//'; }
+usage() { sed -n '2,25p' "$0" | sed 's/^#//'; }
 
 FRESH=0
 FRESH_PREPROCESS=0
 SETUP_ONLY=0
+FIT_THROUGH=""
 for arg in "$@"; do
     case "$arg" in
         --fresh)            FRESH=1 ;;
         --fresh-preprocess) FRESH_PREPROCESS=1 ;;
         --setup-only)       SETUP_ONLY=1 ;;
+        --fit-through=*)    FIT_THROUGH="${arg#*=}" ;;
         -h|--help)          usage; exit 0 ;;
         *) echo "Unknown option: $arg"; usage; exit 1 ;;
     esac
@@ -144,7 +150,11 @@ else
     echo
     echo "[1/3] Scraping Statcast data — this takes 30-90 minutes ..."
     echo "      Keep the laptop plugged in and awake (System Settings > Battery)."
-    "$PY" 01_scrape_statcast.py \
+    # The scrape is incremental whenever the parquet exists; --fresh is
+    # what makes it start over, so pass ours through.
+    SCRAPE_ARGS=""
+    [ "$FRESH" = 1 ] && SCRAPE_ARGS="--fresh"
+    "$PY" 01_scrape_statcast.py $SCRAPE_ARGS \
         || fail "scrape failed. Check your internet connection and re-run; Baseball Savant can be flaky."
     [ -f "$PARQUET" ] || fail "scrape finished but $PARQUET was not created."
     SIZE=$(file_size "$PARQUET")
@@ -164,7 +174,12 @@ else
     fi
     echo
     echo "[2/3] Preprocessing into training arrays ..."
-    "$PY" 02_preprocess.py || fail "preprocessing failed. Scroll up for the Python traceback."
+    # Without --fit-through every season in the parquet goes into the
+    # scalers and ID maps, and none of them can be a clean test season
+    # afterwards. 02_preprocess.py says so when that happens.
+    PRE_ARGS=""
+    [ -n "$FIT_THROUGH" ] && PRE_ARGS="--fit-through $FIT_THROUGH"
+    "$PY" 02_preprocess.py $PRE_ARGS || fail "preprocessing failed. Scroll up for the Python traceback."
 fi
 
 # ---- 6. Step 3: train ----
@@ -178,5 +193,9 @@ echo " Eval report:      data_v5/eval_report_v5.txt   (safe to close the termina
 echo " Training curves:  data_v5/training_curves_v5.png"
 echo " Paste the report back into Claude Code / Cursor and log the run"
 echo " in docs/EXPERIMENTS.md. Regenerate it any time with:"
-echo "     .venv/bin/python evaluate_model.py"
+echo "     .venv/bin/python evaluate_model.py --as-trained"
+echo
+echo " That report is not the product number. Measure the hitter's edge,"
+echo " which is what the site shows, with:"
+echo "     .venv/bin/python analyze_actionability.py"
 echo

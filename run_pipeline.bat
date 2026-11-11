@@ -138,7 +138,11 @@ if exist "statcast_raw_v5.parquet" if %SCRAPE_VALID%==0 (
 )
 echo.
 echo [1/3] Scraping Statcast data — this takes 30-90 minutes ...
-"%PY%" 01_scrape_statcast.py
+REM The scrape is incremental whenever the parquet exists; --fresh is
+REM what makes it start over, so pass ours through.
+set SCRAPE_ARGS=
+if %FRESH%==1 set SCRAPE_ARGS=--fresh
+"%PY%" 01_scrape_statcast.py %SCRAPE_ARGS%
 if errorlevel 1 (
     echo ERROR: scrape failed. Check your internet connection and re-run;
     echo Baseball Savant can be flaky — a re-run resumes from scratch.
@@ -188,7 +192,10 @@ echo  Eval report:      data_v5\eval_report_v5.txt   ^(safe to close this window
 echo  Training curves:  data_v5\training_curves_v5.png
 echo  Paste the report back into Claude Code and log the run in
 echo  docs\EXPERIMENTS.md. Regenerate it any time with:
-echo      .venv\Scripts\python.exe evaluate_model.py
+echo      .venv\Scripts\python.exe evaluate_model.py --as-trained
+echo.
+echo  That report is not the product number. Measure the hitter's edge with:
+echo      .venv\Scripts\python.exe analyze_actionability.py
 echo ============================================
 pause
 exit /b 0

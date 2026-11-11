@@ -9,6 +9,8 @@
 *.h5
 data_v4/
 data_v5/
+# data_v5/ extended forward by `02_preprocess.py --freeze-from` (same size again)
+data_ext/
 
 # Python
 __pycache__/
