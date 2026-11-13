@@ -3,6 +3,10 @@
 # .bak does not match *.parquet, so an old multi-GB scrape sitting next
 # to the current one would be staged by `git add -A` and pushed.
 *.parquet.bak
+# A write in progress, and the scrape's per-window checkpoint directory
+# (its contents are *.parquet and already ignored; this hides the folder).
+*.parquet.tmp
+statcast_raw_v5.parts/
 *.npy
 *.keras
 *.pkl
