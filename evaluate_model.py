@@ -33,6 +33,7 @@ Takes a few minutes per season (one NumPy predict pass).
 import argparse
 import hashlib
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -91,6 +92,15 @@ def load_split(y_labels, data_dir: Path = DATA_DIR):
     """
     split_path = data_dir / "split_v5.json"
     split = json.loads(split_path.read_text()) if split_path.exists() else {}
+    meta_path = data_dir / "meta_v5.json"
+    built = (json.loads(meta_path.read_text()).get("build_id")
+             if meta_path.exists() else None)
+    if split and built and split.get("build_id") != built:
+        raise SystemExit(
+            f"The arrays in {data_dir.name}/ were rebuilt after this model was trained "
+            f"(build ids differ). A rebuild can renumber players under a model that "
+            f"still expects the old numbering, so its predictions would be for the "
+            f"wrong pitchers. Retrain with 03_train.py.")
     mode = split.get("mode", "random")
     idx = np.arange(len(y_labels))
     if mode == "temporal":
@@ -252,6 +262,47 @@ def predict_rows(model, X, rows, mask_rows, batch: int = 4096, label: str = "",
     if all_heads:
         return outs
     return outs.get("", np.empty((0, 0), dtype=np.float32))
+
+
+def predict_cached(data_dir: Path, model, X, rows, mask_rows, label: str = "",
+                   known: dict = None):
+    """
+    predict_rows, remembered on disk in <data_dir>/pred_cache/.
+
+    A season takes minutes to score and the gate scores four. If a later
+    step then fails — real data finds ways that synthetic data does not —
+    those minutes should not be paid again on the re-run. The key covers
+    everything the probabilities depend on: the weights, which rows, the
+    mask handed to each row, the id lookups, and the identity of the
+    input arrays on disk. Change any of them and it is a different file.
+    """
+    rows = np.asarray(rows)
+    h = hashlib.sha256()
+    h.update(hashlib.sha256((data_dir / "best_model_v5.keras").read_bytes()).digest())
+    h.update(np.ascontiguousarray(rows).tobytes())
+    h.update(np.ascontiguousarray(mask_rows).tobytes())
+    for k in sorted(known or {}):
+        h.update(k.encode())
+        h.update(np.ascontiguousarray(known[k]).tobytes())
+    for name in ("X_seq.npy", "X_ctx.npy"):
+        st = (data_dir / name).stat()
+        h.update(f"{name}:{st.st_size}:{st.st_mtime_ns}".encode())
+    path = data_dir / "pred_cache" / f"{h.hexdigest()[:24]}.npy"
+    if path.exists():
+        try:
+            saved = np.load(path)
+            if saved.shape[0] == len(rows):
+                print(f"  {label or 'predictions'}: reused from an earlier run "
+                      f"(same model, rows, mask and inputs)", flush=True)
+                return saved
+        except Exception:
+            pass                      # unreadable: score again and replace it
+    probs = predict_rows(model, X, rows, mask_rows, label=label, known=known)
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_name(path.stem + ".tmp.npy")
+    np.save(tmp, probs)
+    os.replace(tmp, path)
+    return probs
 
 
 def scoring_mask(pitcher_ids, labels, idx_tr, n_pitch, row_meta=None):

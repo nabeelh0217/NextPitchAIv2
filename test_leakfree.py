@@ -17,7 +17,9 @@ No data and no model needed; runs in a few seconds.
     .venv/bin/python test_leakfree.py
 """
 
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -321,6 +323,39 @@ def test_cell_summary_matches_a_plain_loop():
         assert pc["n"] == m.sum() and np.isclose(pc["model"], tool_ok[m].mean())
 
 
+def test_counts_outside_the_usual_range_do_not_break_the_tables():
+    # Statcast holds the occasional pitch on a 4-ball or 3-strike count. The
+    # synthetic league never had one; the real data does.
+    rng = np.random.default_rng(11)
+    n = 4000
+    pitcher = rng.choice([101, 202], n)
+    pid_enc = (pitcher // 100).astype(np.int64)
+    balls, strikes = rng.integers(0, 4, n), rng.integers(0, 3, n)
+    balls[::97], strikes[::89] = 4, 3
+    hard = rng.integers(0, 2, n)
+    lean = gate.old_bar_lean(pid_enc, balls, strikes, hard, np.arange(3000), np.arange(3000, n))
+    assert lean.shape == (1000,) and lean.dtype == bool
+    # ...and each cell's call is still the training majority for that exact cell.
+    for b, s in ((4, 0), (1, 3), (2, 2)):
+        tr = (pid_enc[:3000] == 1) & (balls[:3000] == b) & (strikes[:3000] == s)
+        ev = (pid_enc[3000:] == 1) & (balls[3000:] == b) & (strikes[3000:] == s)
+        if tr.sum() >= gate.OLD_BAR_MIN_TRAIN and ev.any():
+            assert (lean[ev] == (hard[:3000][tr].mean() >= 0.5)).all()
+
+    tool_ok, bar_ok = rng.random(n) < 0.7, rng.random(n) < 0.66
+    b2, s2 = balls.copy(), strikes.copy()
+    b2[:400], s2[:400] = 1, 3                          # a "1-3" count with enough pitches to report
+    p2 = pitcher.copy()
+    p2[:400] = 101
+    cs = gate.cell_summary(p2, b2, s2, hard, tool_ok, bar_ok)
+    labels = [pc["count"] for pc in cs["per_count"]]
+    assert len(labels) == len(set(labels))            # one row per count, none merged
+    assert "1-3" in labels and "2-0" in labels
+    one_three = next(pc for pc in cs["per_count"] if pc["count"] == "1-3")
+    keep = cs["in_cells"] & (b2 == 1) & (s2 == 3)
+    assert one_three["n"] == keep.sum()
+
+
 def test_slice_rows_reports_every_table_on_the_same_pitches():
     rng = np.random.default_rng(8)
     conf = rng.random(5000) * 0.5 + 0.5
@@ -403,6 +438,75 @@ def test_an_ablation_edit_cannot_leak_into_the_source_arrays():
     got = em.predict_rows(_EchoModel(), X, np.arange(n), mask, batch=64, edit=blank)
     assert (got[:, 0] == 0).all() and (got[:, 1] == 5.0).all()
     assert np.array_equal(X["pitcher_id"], np.arange(n)) and (X["ctx"] == 1.0).all()
+
+
+class _Counting(_EchoModel):
+    calls = 0
+
+    def predict(self, inputs):
+        type(self).calls += 1
+        return super().predict(inputs)
+
+
+def test_saved_predictions_are_reused_only_for_the_very_same_question():
+    n = 500
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        X = {k: np.arange(n, dtype=np.int32) % 9 for k in em.INPUT_KEYS}
+        X["ctx"] = np.arange(n, dtype=np.float32)[:, None]
+        X["seq"] = np.zeros((n, 2, 2), dtype=np.float32)
+        for name in ("X_seq.npy", "X_ctx.npy"):
+            np.save(d / name, X[name[2:-4]])
+        (d / "best_model_v5.keras").write_bytes(b"weights-A")
+        rows, mask = np.arange(100, 400), np.ones((n, 3), dtype=np.uint8)
+        known = em.known_ids(X, np.arange(100))
+        m = _Counting()
+
+        def ask(**kw):
+            args = dict(rows=rows, mask_rows=mask[rows], known=known)
+            args.update(kw)
+            before = _Counting.calls
+            out = em.predict_cached(d, m, X, **args)
+            return out, _Counting.calls > before
+
+        first, scored = ask()
+        assert scored
+        again, scored = ask()
+        assert not scored and np.array_equal(first, again)       # same question: reused
+        # Anything the answer depends on makes it a different question.
+        assert ask(rows=np.arange(101, 401), mask_rows=mask[101:401])[1]
+        other = mask[rows].copy()
+        other[0, 0] = 0
+        assert ask(mask_rows=other)[1]
+        assert ask(known=None)[1]
+        (d / "best_model_v5.keras").write_bytes(b"weights-B")
+        assert ask()[1]
+        np.save(d / "X_ctx.npy", X["ctx"] + 1)                  # the arrays were rebuilt
+        assert ask()[1]
+
+
+def test_a_model_is_refused_once_its_arrays_have_been_rebuilt():
+    y = np.zeros(10, dtype=np.int64)
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        np.save(d / "X_season.npy", np.r_[np.full(6, 2024), np.full(4, 2025)])
+        split = {"mode": "temporal", "holdout_season": 2025, "n_train": 6, "n_val": 4}
+
+        def load(meta_build, split_build):
+            (d / "meta_v5.json").write_text(json.dumps(
+                {} if meta_build is None else {"build_id": meta_build}))
+            (d / "split_v5.json").write_text(json.dumps(
+                split if split_build is None else {**split, "build_id": split_build}))
+            return em.load_split(y, d)
+
+        assert len(load("aaa", "aaa")[0]) == 6          # trained on this build
+        assert len(load(None, None)[0]) == 6            # a dataset from before build ids
+        for meta_build, split_build in (("bbb", "aaa"), ("bbb", None)):
+            try:
+                load(meta_build, split_build)
+                raise AssertionError("scored a model against rebuilt arrays")
+            except SystemExit as e:
+                assert "rebuilt" in str(e)
 
 
 # ---------------------------------------------------------------------

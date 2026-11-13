@@ -228,7 +228,10 @@ SPLIT_DESC = (f"temporal, validate on {HOLDOUT_SEASON}" if SPLIT_MODE == "tempor
               else "random 80%/20%, seed 42")
 with open(DATA_DIR / "split_v5.json", "w") as f:
     json.dump({"mode": SPLIT_MODE, "holdout_season": HOLDOUT_SEASON,
-               "n_train": int(len(idx_tr)), "n_val": int(len(idx_val))}, f, indent=2)
+               "n_train": int(len(idx_tr)), "n_val": int(len(idx_val)),
+               # The build of the arrays this model was trained on; see
+               # evaluate_model.load_split.
+               "build_id": meta.get("build_id")}, f, indent=2)
 print(f"Split recorded: {SPLIT_DESC}")
 
 # Rebuild the arsenal mask from TRAINING rows only.

@@ -55,6 +55,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -115,6 +116,80 @@ FROZEN_CHECK = [
 # and the record of how it was split and trained.
 FROZEN_COPY = ["best_model_v5.keras", "split_v5.json",
                "training_history_v5.json", "arsenal_mask_table_v5.npy"]
+
+
+# Raw columns the features are built from. If one of them goes missing or
+# empty in a later season, the feature builders fill in a constant and
+# carry on, so nothing fails: that season is just quietly scored on worse
+# inputs than the seasons the model learned from. For a test season that
+# is an unfair test, and it would look exactly like a fair one.
+RAW_INPUTS = [
+    "balls", "strikes", "outs_when_up", "inning", "inning_topbot",
+    "on_1b", "on_2b", "on_3b", "bat_score", "fld_score", "stand", "p_throws",
+    "release_speed", "release_spin_rate", "plate_x", "plate_z", "pfx_x", "pfx_z",
+    "sz_top", "sz_bot", "home_team", "fielder_2", "n_thruorder_pitcher",
+    "pitcher_days_since_prev_game", "description", "pitch_number", "at_bat_number",
+]
+CATEGORICAL_INPUTS = ["description", "stand", "p_throws", "inning_topbot", "home_team"]
+DRIFT_NOTE = 0.02     # this much emptier (or newer) than the fitted seasons: reported
+DRIFT_STOP = 0.20     # this much: the build stops
+# Results that describe one particular build of the arrays. A rebuild
+# makes them stale, and a stale claim beside new arrays is a number
+# measured on something else.
+DERIVED = ["meta_v5.json", "product_claim_v5.json", "actionability_report_v5.txt",
+           "eval_report_v5.txt", "commit_cards_v5.txt", "commit_cards_v5.json"]
+
+
+def input_drift(df, fit_rows, raw_per_season, kept_per_season):
+    """
+    Compare each held-out season's raw inputs with the fitted seasons'.
+    Returns (notes, stops): things worth knowing, and things that mean the
+    held-out season was not built from the same inputs.
+    """
+    notes, stops = [], []
+    held = ~fit_rows
+    if not held.any() or not fit_rows.any():
+        return notes, stops
+    seasons = df["game_date"].dt.year.values
+    fit_null = {c: float(df[c][fit_rows].isna().mean()) for c in RAW_INPUTS if c in df.columns}
+    fit_known = {c: set(df[c][fit_rows].dropna().unique()) for c in CATEGORICAL_INPUTS
+                 if c in df.columns}
+    fit_seasons = sorted(set(seasons[fit_rows].tolist()))
+    raw_fit = sum(int(raw_per_season.get(s, 0)) for s in fit_seasons)
+    drop_fit = 1.0 - sum(int(kept_per_season.get(s, 0)) for s in fit_seasons) / max(raw_fit, 1)
+
+    for season in sorted(set(seasons[held].tolist())):
+        m = held & (seasons == season)
+        n = int(m.sum())
+        for c in RAW_INPUTS:
+            if c not in df.columns:
+                continue                      # absent everywhere: nothing changed between seasons
+            share = float(df[c][m].isna().mean())
+            line = (f"{season}: `{c}` is empty in {share:.1%} of pitches "
+                    f"({fit_null[c]:.1%} in the fitted seasons)")
+            if share - fit_null[c] > DRIFT_STOP:
+                stops.append(line)
+            elif share - fit_null[c] > DRIFT_NOTE:
+                notes.append(line)
+        for c, known in fit_known.items():
+            vals = df[c][m]
+            unseen = vals[vals.notna() & ~vals.isin(known)]
+            if len(unseen):
+                share = len(unseen) / n
+                top = {str(k): int(v) for k, v in unseen.value_counts().head(4).items()}
+                line = (f"{season}: `{c}` has values the fitted seasons never had in "
+                        f"{share:.2%} of pitches: {top}")
+                (stops if share > DRIFT_STOP else notes).append(line)
+        raw_n = int(raw_per_season.get(season, 0))
+        if raw_n:
+            dropped = 1.0 - int(kept_per_season.get(season, 0)) / raw_n
+            line = (f"{season}: {dropped:.2%} of raw rows were dropped as unusable "
+                    f"({drop_fit:.2%} in the fitted seasons)")
+            if dropped - drop_fit > DRIFT_STOP:
+                stops.append(line)
+            elif dropped - drop_fit > DRIFT_NOTE:
+                notes.append(line)
+    return notes, stops
 
 
 def sha256_of(path: Path) -> str:
@@ -210,6 +285,20 @@ def main():
     print(f"  Using {path.name}")
     df = pd.read_parquet(path)
     print(f"Raw rows: {len(df):,}")
+    raw_per_season = {}
+    if "game_date" in df.columns:
+        df["game_date"] = pd.to_datetime(df["game_date"])
+        raw_per_season = {int(k): int(v) for k, v in
+                          df["game_date"].dt.year.value_counts().sort_index().items()}
+        print("  per season: " + ", ".join(f"{k}: {v:,}" for k, v in raw_per_season.items()))
+    if frozen is not None and raw_per_season and set(raw_per_season) <= fit_seasons:
+        # Said now, in the first seconds, rather than after ten minutes of
+        # building an "extension" that extends nothing.
+        raise SystemExit(
+            f"\nNothing to extend: {path.name} holds only the seasons "
+            f"{sorted(raw_per_season)}, which is what {frozen.name}/ was built on.\n"
+            f"Did the scrape finish? It ends with 'Saved to:' and a row count for the "
+            f"new season:\n\n    .venv/bin/python 01_scrape_statcast.py\n")
 
     # ---------------------------
     # Filter unusable rows
@@ -231,6 +320,8 @@ def main():
         df["game_date"] = pd.Timestamp("2000-01-01")
         df = df.sort_values(["game_pk", "at_bat_number", "pitch_number"])
     df = df.reset_index(drop=True)
+    kept_per_season = {int(k): int(v) for k, v in
+                       df["game_date"].dt.year.value_counts().sort_index().items()}
 
     # ---------------------------
     # Target labels (canonical pitch type)
@@ -276,6 +367,28 @@ def main():
             raise SystemExit("frozen mode: the raw data holds none of the "
                              f"seasons the artifacts were fitted on {sorted(fit_seasons)}")
     league_dist = pitch_onehot[fit_rows].mean(axis=0)
+
+    # Checked now, seconds in, before any of the slow work: is each held-out
+    # season made of the same raw inputs as the seasons the model learned from?
+    drift_notes, drift_stops = input_drift(df, fit_rows, raw_per_season, kept_per_season)
+    if drift_notes or drift_stops:
+        print("\nHeld-out season(s) vs the fitted seasons, raw inputs:")
+        for line in drift_stops:
+            print(f"  STOP  {line}")
+        for line in drift_notes:
+            print(f"  note  {line}")
+    elif (~fit_rows).any():
+        print("\nHeld-out season(s): every raw input column is as complete as in the "
+              "fitted seasons,\nand no category value is new.")
+    if drift_stops and frozen is not None:
+        print("\n" + "!" * 68)
+        print("The new season's raw data is not like the seasons the model learned")
+        print("from (STOP lines above). Its features would be filled in with")
+        print("constants, and a test on them would not be a test of this model.")
+        print("If Savant renamed or dropped a column, the scrape needs to follow it.")
+        print("!" * 68)
+        if not args.allow_mismatch:
+            raise SystemExit(4)
 
     # ---------------------------
     # Player / park / catcher ID mappings
@@ -494,6 +607,12 @@ def main():
     # Save everything
     # ---------------------------
     print(f"\nSaving arrays to {out_dir}...")
+    # Gone first, written last: an interrupted save leaves a directory with
+    # no meta_v5.json, which every later step refuses, instead of new
+    # arrays beside the previous build's metadata and claim.
+    for name in DERIVED:
+        (out_dir / name).unlink(missing_ok=True)
+    shutil.rmtree(out_dir / "pred_cache", ignore_errors=True)
     np.save(out_dir / "X_seq.npy", X_seq)
     np.save(out_dir / "X_ctx.npy", X_ctx_scaled)
     np.save(out_dir / "X_pitcher_id.npy", X_pitcher_id)
@@ -566,6 +685,13 @@ def main():
         # --fit-through held later seasons out.
         "fit_seasons": sorted(int(s) for s in fit_seasons),
         "frozen_from": str(frozen) if frozen is not None else None,
+        # Which build of the arrays this is. 03_train.py copies it into
+        # split_v5.json, and the scoring scripts refuse a model whose
+        # arrays have been rebuilt since: a rebuild can renumber the ID
+        # maps under a model that still expects the old numbering. A
+        # frozen extension reproduces the original arrays exactly, so it
+        # keeps the id of the dataset it extends.
+        "build_id": (frozen_meta.get("build_id") if frozen is not None else uuid.uuid4().hex),
         "n_pitcher_ids": len(pitcher_map) + 1,
         "n_batter_ids": len(batter_map) + 1,
         "n_park_ids": len(park_map) + 1,
@@ -574,6 +700,9 @@ def main():
         "min_batter_appearances": MIN_BATTER_APPEARANCES,
         "min_catcher_appearances": MIN_CATCHER_APPEARANCES,
     }
+
+    meta["input_drift"] = {"notes": drift_notes, "stops": drift_stops}
+
     if frozen is not None:
         # The original seasons must be a prefix of the new arrays: same
         # rows, same order, with every new row strictly later.

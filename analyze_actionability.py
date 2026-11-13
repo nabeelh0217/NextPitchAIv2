@@ -48,7 +48,7 @@ from evaluate_model import (
     DATA_DIR, FASTBALL_FAMILY, SCOUT_PLAIN, SCOUT_RUNGS, apply_temperature,
     build_arsenal_mask, fit_temperature, full_mask_through, known_ids,
     live_scout, load_inputs, load_row_meta, load_scoring_model, load_split,
-    predict_rows, read_split, scoring_mask, widest_ci,
+    predict_cached, read_split, scoring_mask, widest_ci,
 )
 from pitch_features import dense_codes
 
@@ -94,14 +94,18 @@ def old_bar_lean(pid_enc, balls, strikes, hard, idx_tr, rows):
     against, and how far each correction moves it.
     """
     n_pid = int(pid_enc.max()) + 1
-    ch = np.zeros((n_pid, 4, 3))
-    ct = np.zeros((n_pid, 4, 3))
+    # Sized from the data. Statcast holds the occasional pitch thrown on a
+    # 4-ball or 3-strike count (the umpire lost track; it happens), and a
+    # table built for 0-3 / 0-2 only would not have a cell for it.
+    nb, ns = int(balls.max()) + 1, int(strikes.max()) + 1
+    ch = np.zeros((n_pid, nb, ns))
+    ct = np.zeros((n_pid, nb, ns))
     np.add.at(ch, (pid_enc[idx_tr], balls[idx_tr], strikes[idx_tr]), hard[idx_tr])
     np.add.at(ct, (pid_enc[idx_tr], balls[idx_tr], strikes[idx_tr]), 1.0)
     lean = np.zeros(len(rows), dtype=bool)
     p, b, s, h = pid_enc[rows], balls[rows], strikes[rows], hard[rows]
-    for bb in range(4):
-        for ss in range(3):
+    for bb in range(nb):
+        for ss in range(ns):
             sel = (b == bb) & (s == ss)
             if not sel.any():
                 continue
@@ -158,12 +162,15 @@ def cell_summary(pitcher, balls, strikes, hard, tool_ok, bar_ok):
     # Per count, over the qualifying cells only.
     first = np.zeros(g, dtype=np.int64)
     first[cell[::-1]] = np.arange(len(cell))[::-1]        # a row of each cell
-    cnt = balls[first] * 3 + strikes[first]
+    # Balls and strikes kept apart: packing them as balls*3+strikes would
+    # file a 1-3 count under "2-0" if the data ever holds one.
+    cnt = dense_codes(balls[first], strikes[first])
     per_count = []
     for c in np.unique(cnt[keep]):
         m = keep & (cnt == c)
+        r = first[np.flatnonzero(m)[0]]
         per_count.append({
-            "count": f"{int(c) // 3}-{int(c) % 3}", "n": int(n[m].sum()),
+            "count": f"{int(balls[r])}-{int(strikes[r])}", "n": int(n[m].sum()),
             "model": float(tool_n[m].sum() / n[m].sum()),
             "bar": float(bar_n[m].sum() / n[m].sum()),
             "oracle": float(oracle_n[m].sum() / n[m].sum()),
@@ -192,8 +199,18 @@ def main():
     data_dir = args.data_dir.resolve()
 
     lines = []
-    out = lines.append
 
+    def out(line=""):
+        # Printed as it is produced, as well as kept for the report file: a
+        # run that stops part-way still shows everything it had worked out.
+        lines.append(line)
+        print(line, flush=True)
+
+    if not (data_dir / "meta_v5.json").exists():
+        raise SystemExit(
+            f"{data_dir.name}/ has no meta_v5.json: 02_preprocess.py did not finish "
+            f"building it (it writes that file last). Re-run it and check that it "
+            f"ends with 'Done!'.")
     meta = json.loads((data_dir / "meta_v5.json").read_text())
     classes = meta["pitch_classes"]
     K = len(classes)
@@ -262,7 +279,7 @@ def main():
     def evaluate(rows, label, temp=None):
         """Score one season. Fits the temperature on its first half unless
         one is passed in, in which case nothing at all is fitted."""
-        raw = predict_rows(model, X, rows, mask[rows], label=label, known=known)
+        raw = predict_cached(data_dir, model, X, rows, mask[rows], label=label, known=known)
         yv = y[rows]
         if temp is None:
             half = len(yv) // 2
@@ -303,6 +320,15 @@ def main():
     out("bucket the model WAS trained with:")
     nt_val = never_trained(idx_val)
     out("  " + "   ".join(f"{k.replace('_id', '')} {v:.1%}" for k, v in nt_val.items()))
+    drift = meta.get("input_drift") or {}
+    if drift.get("notes") or drift.get("stops"):
+        out("")
+        out("When this dataset was built, the held-out seasons' raw inputs differed")
+        out("from the fitted seasons' in these ways. Read the result with them in mind:")
+        for line in drift.get("stops", []):
+            out(f"  STOP  {line}")
+        for line in drift.get("notes", []):
+            out(f"  note  {line}")
 
     # -----------------------------------------------------------------
     # The bar is the strongest table ON THE VALIDATION SEASON, and is
@@ -333,7 +359,7 @@ def main():
 
         def as_before(mask_rows, label):
             """One pass the way the old gate fed the model: ids untouched."""
-            raw = predict_rows(model, X, idx_val, mask_rows, label=label)
+            raw = predict_cached(data_dir, model, X, idx_val, mask_rows, label=label)
             t, _ = fit_temperature(raw[:half], y[idx_val][:half])
             _, call, conf = binary_read(apply_temperature(raw, t), fam)
             return float(t), conf, call == val["hard_true"]
@@ -654,7 +680,6 @@ def main():
             out("may not claim an edge.")
 
     text = "\n".join(lines)
-    print(text)
     report_path = data_dir / "actionability_report_v5.txt"
     report_path.write_text(text + "\n")
 
