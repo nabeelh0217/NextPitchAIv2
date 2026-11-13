@@ -32,6 +32,13 @@ part of the command.
 test number on the site):
 
 ```bash
+./run_new_season.sh
+```
+
+That runs the four steps below in order and stops at the first one that
+fails, telling you which. They can also be run one at a time:
+
+```bash
 .venv/bin/python 01_scrape_statcast.py
 .venv/bin/python 02_preprocess.py --freeze-from data_v5 --out-dir data_ext
 .venv/bin/python analyze_actionability.py --data-dir data_ext --test-season 2026
@@ -252,6 +259,29 @@ builds, which ship their own OpenSSL and ignore the system keychain:
 
 Then re-run the name fetch and rebuild. The bundle itself builds fine
 without names.
+
+**The scrape says "The download is safe; the merge is what failed".**
+Your existing file has not been touched, and the weeks it downloaded are
+kept in `statcast_raw_v5.parts/`, so the next run will not download them
+again. The "Reason" line names the column and the two types that would
+not fit together; send that line.
+
+**The scrape lists weeks it "left alone".** They are weeks with no rows
+inside a season your trained model was built on. Usually they simply had
+no games. Fetching one would change that season's data, and step 2 would
+then refuse, so it does not unless you pass `--fill-gaps`.
+
+**Step 2 says "Nothing to extend".** The parquet holds no season beyond
+the ones `data_v5/` was built on: the scrape did not finish. Run it
+again and check it ends with "Saved to:".
+
+**Step 2 stops on a `STOP` line about a column being empty.** Baseball
+Savant has stopped sending, or renamed, a column the model uses, for the
+new season only. Nothing was written. This needs a code change in the
+scrape; send the STOP lines.
+
+**"The arrays were rebuilt after this model was trained".** `data_v5/`
+was re-preprocessed and the model in it is from before. Retrain.
 
 **`02_preprocess.py --freeze-from` stops with "does not reproduce".**
 The 2022-2025 rows no longer produce the arrays the model was trained

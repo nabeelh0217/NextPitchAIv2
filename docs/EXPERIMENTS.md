@@ -1088,6 +1088,61 @@ and the two verdicts here._
 | 2025, fair measurement | | | | | |
 | **2026, clean test** | | | | | |
 
+### First real attempt (2026-11-13): the scrape could not save, and what that exposed
+
+The download worked — 714,115 pitches for 2026 — and then the merge
+failed: `ArrowTypeError: Expected bytes, got a 'Timestamp' object ...
+column game_date`. Nothing was written; the existing file is intact.
+The three later commands ran anyway, on the old file. No 2026 number
+was produced, so the pre-registration above is untouched.
+
+**Cause.** pybaseball parses date columns only when pandas reports
+their dtype as "object" or "string". pandas 3 reports "str", so under
+pandas 3 `game_date` comes back as text, and under pandas 2 as
+timestamps. The four-season file was scraped under pandas 3. Installing
+`site/requirements.txt` (`pandas<3.0`) into the same venv later moved it
+to pandas 2.3.3, and the new pull then had timestamps. `pd.concat` put
+both in one column. The traceback's line numbers match pandas 2.3.3 and
+pyarrow 21.0.0 exactly.
+
+**Why the test missed it.** The harness replaced `pybaseball.statcast()`
+with a stub that served one parquet for both "existing" and "new", so
+the two always had the same dtype. Rebuilt to stub only the HTTP request,
+with the real pybaseball above it, in two environments (pandas 2.3.3 /
+pyarrow 21 and pandas 3.1.1 / pyarrow 26), it reproduces the user's
+error character for character.
+
+**The fix, and what else the same question turned up.** Asking "what
+does real data or a real machine have that the synthetic run did not?":
+
+| found | what would have happened | now |
+|---|---|---|
+| dates text vs timestamp across pandas versions | the crash | new rows are converted to the existing file's stored type and format, at the file level; old rows are copied through and compared before the replace |
+| a failed merge threw the download away | 15 minutes lost per attempt | each week is checkpointed and reused |
+| a gap inside an old season would be "filled" | frozen check fails at step 2, after the download | seasons `data_v5/` was built on are left alone unless `--fill-gaps` |
+| `--freeze-from` on a file with no new season | ten minutes building an extension of nothing | refused in the first seconds |
+| counts outside 0-3 / 0-2 (Statcast has a few) | `IndexError` in the gate, after the first three-minute pass | tables are sized from the data; a 1-3 count is no longer filed under "2-0" |
+| a model input column empty in the new season | features silently filled with constants; an unfair test that looks fair | frozen build stops in ~1 s; smaller differences are recorded and printed by the gate |
+| a late failure in the gate | all four prediction passes paid again | scored seasons are cached, keyed on model, rows, mask, id rule and inputs |
+| later steps running after an earlier one failed | happened | `./run_new_season.sh` stops at the first failure |
+| arrays rebuilt under a trained model | old model scored against renumbered players | `build_id` ties them; a rebuild clears the stale claim |
+| two pandas majors in one venv | the root of all of it | runners pin the serving bounds |
+
+Verified in the replica of the user's environment: the September state
+was rebuilt with the original code under pandas 3 (scrape, preprocess,
+5-epoch model, old gate), the user's failed session was replayed step
+for step with the pushed code, and the fixed chain then ran clean from
+that state. The gate re-derives the old gate's published number exactly
+across the environment change. A second league with 4-ball and 3-strike
+counts, a `description` and a `home_team` only 2026 has, extra dropped
+rows and a column that goes missing passes with notes, or is refused,
+as designed.
+
+One more thing this run established, on the real data: frozen-mode
+preprocessing under pandas 2.3.3 reproduced all 2,863,341 original rows
+of a dataset built in September with max difference 0. The features do
+not depend on which pandas built them.
+
 ### What this sets up
 
 The measurement is now the thing a model change is judged against. In

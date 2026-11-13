@@ -111,14 +111,19 @@ of the figures on the site. To test the shipped model on a season it has
 never seen, with nothing tuned on that season:
 
 ```bash
-.venv/bin/python 01_scrape_statcast.py
-.venv/bin/python 02_preprocess.py --freeze-from data_v5 --out-dir data_ext
-.venv/bin/python analyze_actionability.py --data-dir data_ext --test-season 2026
+./run_new_season.sh
 ```
+
+It scrapes only what is missing, extends the dataset with nothing
+refitted, runs the gate and rebuilds the serving bundle, stopping at the
+first step that fails.
 
 `.venv/bin/python test_leakfree.py` checks, in a few seconds and without
 any data, that neither the model's arsenal mask nor the scouting table it
 is compared against can see the pitch being judged or anything after it.
+`.venv/bin/python test_scrape_merge.py` does the same for adding rows to
+the scrape: existing rows untouched, new rows stored the way the file
+already stores them.
 
 ## Notes
 

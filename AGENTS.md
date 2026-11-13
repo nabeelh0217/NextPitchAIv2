@@ -70,12 +70,14 @@ Two rules that follow, and must not be softened:
 
 | Path | Role |
 |---|---|
-| `01_scrape_statcast.py` | Pulls 2022–2026 Statcast pitches via pybaseball → `statcast_raw_v5.parquet` (atomic write). **Incremental**: with a parquet present it fetches only the weeks that have no rows and appends, never rewriting what a model was built on. `--fresh` re-scrapes everything |
+| `01_scrape_statcast.py` | Pulls 2022–2026 Statcast pitches via pybaseball → `statcast_raw_v5.parquet` (atomic write). **Incremental**: with a parquet present it fetches only the weeks that have no rows and appends at the file level — existing rows are copied through as stored and compared before the file is replaced, and NEW rows are converted to the type each column is already stored in. Every downloaded week is checkpointed in `statcast_raw_v5.parts/` until it is merged. `--fresh` re-scrapes everything; `--fill-gaps` also fetches empty weeks inside seasons `data_v5/` was built on |
+| `run_new_season.sh` | **The one command for testing the shipped model on a new season**: scrape → frozen extend → gate → bundle, stopping at the first step that fails |
 | `02_preprocess.py` | Leakage-free feature engineering → `data_v5/` arrays, scalers, ID maps, website artifacts. `--freeze-from data_v5 --out-dir data_ext` extends a dataset forward with the ID maps, scalers and league fallbacks FROZEN, and refuses to finish unless the original seasons reproduce exactly — that is what makes a later season a test set without retraining |
 | `03_train.py` | BiLSTM + embeddings + arsenal-masked softmax, class-weighted focal loss → `data_v5/best_model_v5.keras` + `eval_report_v5.txt` |
 | `evaluate_model.py` | Regenerates the evaluation report from the saved model (same split, no retraining, no TensorFlow). **Also the one home of everything a scoring script needs**: `scoring_mask`, `known_ids`, `live_scout`, `predict_rows`, `cluster_bootstrap_ci`. `03_train.py` imports its `build_report` so the two can't drift. `--as-trained` reproduces the training-time report exactly |
 | `analyze_actionability.py` | **The product gate, and the only source of the site's numbers.** Scores with a causal mask against a live scouting table; section A re-derives the previously published number and shows what each correction costs it. `--test-season 2026` locks temperature, threshold and bar on the validation season and scores the test season once. Run this before any modeling change |
 | `test_leakfree.py` | Checks that the mask and the scouting table never read the pitch being judged or anything after it, each against a brute-force loop. Seconds, no data needed. **Run it after touching `pitch_features.py` or `evaluate_model.py`** |
+| `test_scrape_merge.py` | Checks that adding rows to the scrape leaves existing rows untouched, stores new rows the way the file already does, and changes nothing when it cannot. **Run it after touching `01_scrape_statcast.py`** |
 | `build_commit_cards.py` | Mines per-pitcher, per-count "sit hard / sit soft" rules from held-out predictions. A rule must contradict the pre-season report AND beat the live table. Correctly returns ~nothing; the card format is dead |
 | `diagnose_unknown_pitcher.py` | **Gates the custom-arsenal mode.** Ablates the pitcher embedding to index 0 on held-out rows at the gate's own locked temperature, threshold and bar, so its rows are comparable to section 6 |
 | `diagnose_arsenal.py` | Measures how much the arsenal mask actually constrains, and whether the baseline comparison is fair |
@@ -132,8 +134,16 @@ find one automatically and manage `.venv`. The scrape hits Baseball
 Savant directly — it cannot run from sandboxed/proxied environments.
 
 **Testing the shipped model on a new season, no retraining** — the flow
-that produces the site's number. One command at a time; each prints what
-to run next if something is missing:
+that produces the site's number:
+
+```bash
+./run_new_season.sh
+```
+
+It runs these four in order and STOPS at the first that fails. Run them
+by hand only one at a time, and never paste them as a block: the first
+real attempt did, the scrape failed, and the three steps after it ran
+anyway on the old file.
 
 ```bash
 .venv/bin/python 01_scrape_statcast.py
@@ -143,8 +153,20 @@ to run next if something is missing:
 ```
 
 Then commit `site/serving` and push. TensorFlow is needed for none of
-it. `.venv/bin/python test_leakfree.py` checks the measurement code
-itself in a few seconds.
+it. Every step can be re-run cheaply: the scrape keeps what it has
+downloaded and the gate keeps the seasons it has scored
+(`data_ext/pred_cache/`). `.venv/bin/python test_leakfree.py` and
+`.venv/bin/python test_scrape_merge.py` check the measurement and the
+scrape's merge in a few seconds each.
+
+**One Python environment, pinned.** The runners install
+`pandas>=2.1,<3.0` and `pyarrow>=14,<22`, the same bounds as
+`site/requirements.txt`. That is not cosmetic: pybaseball returns
+`game_date` as TEXT under pandas 3 and as TIMESTAMPS under pandas 2 (it
+only parses columns whose dtype prints as "object" or "string"; pandas 3
+calls it "str"). The original scrape ran under pandas 3, installing the
+site's requirements moved the venv to pandas 2.3, and the first attempt
+to add a season then held both in one column and could not be saved.
 
 ## Hard invariants — do not break these
 
@@ -236,6 +258,32 @@ itself in a few seconds.
    `pitch_features.py`. A scoring script that builds its own copy will
    drift, and the last time four of them did, none of the four agreed
    with what training used.
+14. **The existing file's schema wins.** Rows added to
+   `statcast_raw_v5.parquet` are converted to the type each column is
+   already stored in (dates included, in the file's own text format if
+   it stores text). Existing rows are never passed through pandas, and
+   are compared with the original before the file is replaced. Never
+   `pd.concat` an old file with a new pull: the same pybaseball returns
+   different dtypes under different pandas versions.
+15. **Test against the real library, not a stand-in for it.** A stub of
+   `pybaseball.statcast()` returned one dtype for everything and so
+   could not show what pybaseball does to dtypes; the failure it missed
+   cost a full download. Stub at the HTTP request and let the real code
+   run above it, in the versions the user actually has (a traceback's
+   line numbers identify them exactly).
+16. **A held-out season must be made of the same raw inputs.** The
+   feature builders fill a missing column with a constant and carry on.
+   `02_preprocess.py` compares each held-out season's raw columns and
+   category values with the fitted seasons' in its first seconds, stops
+   a frozen build when a model input has gone missing, and records the
+   smaller differences in `meta_v5.json`, where the gate prints them
+   beside the result.
+17. **A model belongs to one build of the arrays.** `meta_v5.json`
+   carries a `build_id`, `03_train.py` copies it into `split_v5.json`,
+   and `load_split` refuses a model whose arrays were rebuilt since. A
+   rebuild can renumber the ID maps under a model that still expects the
+   old numbering. A rebuild also deletes the claim, the reports and the
+   prediction cache that described the previous arrays.
 
 ## Evaluation vocabulary
 
@@ -257,9 +305,15 @@ features do anything at all**. 10-class top-1 reads lower than the old
   are fixed in the code. `docs/EXPERIMENTS.md` has the detail and the
   criteria, which were written before any 2026 pitch was scored.
 - **The 2026 result is PENDING.** It needs the scrape, which cannot run
-  from a sandbox. Until the four commands under "How to run" have been
-  run and the bundle committed, the live site shows the run-12 figure
-  with a note that it was measured against a frozen report.
+  from a sandbox. Until `./run_new_season.sh` has been run and the bundle
+  committed, the live site shows the run-12 figure with a note that it
+  was measured against a frozen report.
+- **The first real attempt failed at the scrape (2026-11-13)** and is
+  fixed: see invariants 14-17 and the entry in `docs/EXPERIMENTS.md`.
+  The user's machine is Python 3.13, pandas 2.3.3, pyarrow 21.0.0, with
+  a parquet written under pandas 3 (dates as text). On that machine the
+  frozen extension reproduced all 2,863,341 original rows exactly, so
+  preprocessing itself is not sensitive to the pandas change.
 - **Do not quote +4.2, and do not guess the new number.** On a synthetic
   league the same corrections took a +2.0 edge to zero. That shows the
   code works; it says nothing about the size of the effect on real
