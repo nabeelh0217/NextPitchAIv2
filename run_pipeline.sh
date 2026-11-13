@@ -114,9 +114,15 @@ PY=".venv/bin/python"
 # deliberately not installed — it has a history of LSTM/RNN bugs, and a
 # correct model matters more than a faster one. Add it yourself if you
 # want to experiment: .venv/bin/pip install tensorflow-metal
+# pandas and pyarrow carry the SAME bounds as site/requirements.txt, on
+# purpose. Installing that file into this venv (to run the site locally)
+# used to move pandas from 3.x back to 2.x underneath the pipeline — and
+# pybaseball returns dates as text under one and timestamps under the
+# other, which broke the first attempt to add a season to an existing
+# file. One environment, one behaviour.
 echo "Installing/updating dependencies ..."
 "$PY" -m pip install --upgrade pip --quiet
-"$PY" -m pip install --quiet pybaseball pandas numpy pyarrow scikit-learn joblib matplotlib tensorflow \
+"$PY" -m pip install --quiet pybaseball "pandas>=2.1,<3.0" numpy "pyarrow>=14.0,<22.0" scikit-learn joblib matplotlib tensorflow \
     || fail "dependency install failed. Check your internet connection."
 echo "Dependencies OK."
 

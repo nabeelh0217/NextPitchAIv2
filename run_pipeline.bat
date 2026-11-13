@@ -108,7 +108,9 @@ set PY=.venv\Scripts\python.exe
 REM ---- 3. Dependencies ----
 echo Installing/updating dependencies ...
 "%PY%" -m pip install --upgrade pip --quiet
-"%PY%" -m pip install --quiet pybaseball pandas numpy pyarrow scikit-learn joblib imbalanced-learn matplotlib tensorflow
+REM pandas and pyarrow carry the same bounds as site\requirements.txt on purpose:
+REM pybaseball returns dates as text under pandas 3 and as timestamps under pandas 2.
+"%PY%" -m pip install --quiet pybaseball "pandas>=2.1,<3.0" numpy "pyarrow>=14.0,<22.0" scikit-learn joblib imbalanced-learn matplotlib tensorflow
 if errorlevel 1 (
     echo ERROR: dependency install failed. Check your internet connection.
     goto :fail
