@@ -2255,6 +2255,12 @@
     "name": "Wandy Peralta",
     "pos": "P"
   },
+  "594027": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Tyron Guerrero",
+    "pos": "P"
+  },
   "594311": {
     "bats": "R",
     "hand": "R",
@@ -4157,6 +4163,12 @@
     "name": "Jackson Stephens",
     "pos": "P"
   },
+  "623454": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Drew Anderson",
+    "pos": "P"
+  },
   "623465": {
     "bats": "R",
     "hand": "R",
@@ -5015,6 +5027,12 @@
     "name": "Jose Siri",
     "pos": "LF"
   },
+  "642376": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Jefry Yan",
+    "pos": "P"
+  },
   "642397": {
     "bats": "L",
     "hand": "L",
@@ -5613,6 +5631,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Dan Altavilla",
+    "pos": "P"
+  },
+  "656212": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Charlie Barnes",
     "pos": "P"
   },
   "656222": {
@@ -6802,6 +6826,12 @@
     "hand": "R",
     "name": "Cole Sands",
     "pos": "P"
+  },
+  "663494": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Bryan Torres",
+    "pos": "LF"
   },
   "663527": {
     "bats": "R",
@@ -8417,6 +8447,12 @@
     "name": "Robert Dugger",
     "pos": "P"
   },
+  "667652": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jack Ralston",
+    "pos": "P"
+  },
   "667670": {
     "bats": "R",
     "hand": "R",
@@ -9059,6 +9095,12 @@
     "name": "Joe Perez",
     "pos": "3B"
   },
+  "669310": {
+    "bats": "R",
+    "hand": "R",
+    "name": "CJ Van Eyk",
+    "pos": "P"
+  },
   "669326": {
     "bats": "R",
     "hand": "L",
@@ -9124,6 +9166,12 @@
     "hand": "R",
     "name": "Keston Hiura",
     "pos": "1B"
+  },
+  "669384": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Raynel Delgado",
+    "pos": "2B"
   },
   "669387": {
     "bats": "R",
@@ -9371,6 +9419,12 @@
     "name": "Ronel Blanco",
     "pos": "P"
   },
+  "669899": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Ryan Ward",
+    "pos": "LF"
+  },
   "669911": {
     "bats": "S",
     "hand": "L",
@@ -9441,6 +9495,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Colin Holderman",
+    "pos": "P"
+  },
+  "670062": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Julian Garcia",
     "pos": "P"
   },
   "670090": {
@@ -9568,6 +9628,12 @@
     "hand": "R",
     "name": "Matt Wallner",
     "pos": "RF"
+  },
+  "670245": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Ryan Watson",
+    "pos": "P"
   },
   "670276": {
     "bats": "L",
@@ -9755,6 +9821,12 @@
     "name": "Jackson Rutledge",
     "pos": "P"
   },
+  "671155": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Ivan Johnson",
+    "pos": "2B"
+  },
   "671162": {
     "bats": "L",
     "hand": "L",
@@ -9821,6 +9893,12 @@
     "name": "Jason Foley",
     "pos": "P"
   },
+  "671382": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Cameron Foster",
+    "pos": "P"
+  },
   "671655": {
     "bats": "L",
     "hand": "L",
@@ -9857,6 +9935,12 @@
     "name": "Cade Smith",
     "pos": "P"
   },
+  "671936": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Adam Macko",
+    "pos": "P"
+  },
   "671976": {
     "bats": "L",
     "hand": "R",
@@ -9874,6 +9958,12 @@
     "hand": "R",
     "name": "Denzel Clarke",
     "pos": "CF"
+  },
+  "672021": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Eric Cerantola",
+    "pos": "P"
   },
   "672275": {
     "bats": "S",
@@ -9941,6 +10031,12 @@
     "name": "Kaleb Ort",
     "pos": "P"
   },
+  "672442": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Yovanny Cruz",
+    "pos": "P"
+  },
   "672456": {
     "bats": "R",
     "hand": "R",
@@ -9987,6 +10083,18 @@
     "bats": "L",
     "hand": "L",
     "name": "Angel Zerpa",
+    "pos": "P"
+  },
+  "672613": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Eliezer Alfonzo",
+    "pos": "C"
+  },
+  "672629": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Gerardo Carrillo",
     "pos": "P"
   },
   "672640": {
@@ -10102,6 +10210,12 @@
     "hand": "R",
     "name": "Jesus Cruz",
     "pos": "P"
+  },
+  "672960": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Kazuma Okamoto",
+    "pos": "3B"
   },
   "673111": {
     "bats": "L",
@@ -10223,6 +10337,12 @@
     "name": "Tommy Henry",
     "pos": "P"
   },
+  "674073": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jack Weisenburger",
+    "pos": "P"
+  },
   "674285": {
     "bats": "R",
     "hand": "R",
@@ -10312,6 +10432,12 @@
     "hand": "R",
     "name": "Greg Jones",
     "pos": "LF"
+  },
+  "675660": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Shane Drohan",
+    "pos": "P"
   },
   "675848": {
     "bats": "R",
@@ -10553,6 +10679,12 @@
     "name": "Tanner Bibee",
     "pos": "P"
   },
+  "676454": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Brendan Cellucci",
+    "pos": "P"
+  },
   "676466": {
     "bats": "R",
     "hand": "R",
@@ -10653,6 +10785,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Riley O'Brien",
+    "pos": "P"
+  },
+  "676620": {
+    "bats": "R",
+    "hand": "L",
+    "name": "Blake Weiman",
     "pos": "P"
   },
   "676625": {
@@ -11201,6 +11339,12 @@
     "name": "Luarbert Arias",
     "pos": "P"
   },
+  "678218": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Brandon Valenzuela",
+    "pos": "C"
+  },
   "678225": {
     "bats": "L",
     "hand": "R",
@@ -11290,6 +11434,12 @@
     "hand": "R",
     "name": "Wilkin Ramos",
     "pos": "P"
+  },
+  "678577": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Junior Perez",
+    "pos": "CF"
   },
   "678606": {
     "bats": "L",
@@ -11561,6 +11711,12 @@
     "name": "Darlin Moquete",
     "pos": "OF"
   },
+  "680664": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Eduardo Valencia",
+    "pos": "DH"
+  },
   "680684": {
     "bats": "L",
     "hand": "R",
@@ -11747,6 +11903,12 @@
     "name": "Henry Davis",
     "pos": "C"
   },
+  "680802": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Ryan Weiss",
+    "pos": "P"
+  },
   "680814": {
     "bats": "R",
     "hand": "R",
@@ -11795,11 +11957,23 @@
     "name": "Nick Nastrini",
     "pos": "P"
   },
+  "680899": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Erik Tolman",
+    "pos": "P"
+  },
   "680911": {
     "bats": "R",
     "hand": "R",
     "name": "Owen Miller",
     "pos": "2B"
+  },
+  "680916": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Franco Aleman",
+    "pos": "P"
   },
   "680918": {
     "bats": "R",
@@ -11848,6 +12022,12 @@
     "hand": "R",
     "name": "Christian Scott",
     "pos": "P"
+  },
+  "681047": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Christian Franklin",
+    "pos": "CF"
   },
   "681066": {
     "bats": "L",
@@ -11939,6 +12119,12 @@
     "name": "Chase Silseth",
     "pos": "P"
   },
+  "681252": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jack Anderson",
+    "pos": "P"
+  },
   "681293": {
     "bats": "R",
     "hand": "R",
@@ -11950,6 +12136,12 @@
     "hand": "R",
     "name": "Colton Cowser",
     "pos": "CF"
+  },
+  "681320": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Nate Lavender",
+    "pos": "P"
   },
   "681343": {
     "bats": "R",
@@ -12028,6 +12220,12 @@
     "hand": "R",
     "name": "Bryan Lavastida",
     "pos": "C"
+  },
+  "681544": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Wyatt Olds",
+    "pos": "P"
   },
   "681546": {
     "bats": "L",
@@ -12323,6 +12521,12 @@
     "name": "Yaramil Hiraldo",
     "pos": "P"
   },
+  "682445": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Domingo Gonzalez",
+    "pos": "P"
+  },
   "682515": {
     "bats": "R",
     "hand": "R",
@@ -12333,6 +12537,12 @@
     "bats": "L",
     "hand": "L",
     "name": "Antonio Jimenez",
+    "pos": "P"
+  },
+  "682608": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Peyton Gray",
     "pos": "P"
   },
   "682610": {
@@ -12401,6 +12611,12 @@
     "name": "Luisangel Acu\u00f1a",
     "pos": "SS"
   },
+  "682674": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Victor Bericoto",
+    "pos": "LF"
+  },
   "682679": {
     "bats": "S",
     "hand": "R",
@@ -12436,6 +12652,12 @@
     "hand": "R",
     "name": "Bryan Gonzalez",
     "pos": "OF"
+  },
+  "682818": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Yohendrick Pi\u00f1ango",
+    "pos": "LF"
   },
   "682825": {
     "bats": "R",
@@ -12509,6 +12731,12 @@
     "name": "Devin Sweet",
     "pos": "P"
   },
+  "682982": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Daniel Espino",
+    "pos": "P"
+  },
   "682985": {
     "bats": "L",
     "hand": "L",
@@ -12561,6 +12789,12 @@
     "bats": "L",
     "hand": "R",
     "name": "Will Childers",
+    "pos": "P"
+  },
+  "683000": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Riley Cornelio",
     "pos": "P"
   },
   "683002": {
@@ -12671,11 +12905,23 @@
     "name": "Homer Bush Jr.",
     "pos": "CF"
   },
+  "683352": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Mitch Bratt",
+    "pos": "P"
+  },
   "683357": {
     "bats": "L",
     "hand": "R",
     "name": "Owen Caissie",
     "pos": "RF"
+  },
+  "683363": {
+    "bats": "R",
+    "hand": "L",
+    "name": "Matt Wilkinson",
+    "pos": "P"
   },
   "683409": {
     "bats": "R",
@@ -12719,6 +12965,12 @@
     "name": "Anthony Molina",
     "pos": "P"
   },
+  "683679": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jesus Rodriguez",
+    "pos": "C"
+  },
   "683734": {
     "bats": "R",
     "hand": "R",
@@ -12730,6 +12982,12 @@
     "hand": "R",
     "name": "Michael Busch",
     "pos": "1B"
+  },
+  "683742": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jose Franco",
+    "pos": "P"
   },
   "683748": {
     "bats": "L",
@@ -12773,6 +13031,12 @@
     "name": "Shota Imanaga",
     "pos": "P"
   },
+  "684049": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Brandan Bidois",
+    "pos": "P"
+  },
   "684320": {
     "bats": "R",
     "hand": "R",
@@ -12783,6 +13047,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Chase Plymell",
+    "pos": "P"
+  },
+  "684442": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Kohl Drake",
     "pos": "P"
   },
   "684483": {
@@ -12796,6 +13066,12 @@
     "hand": "R",
     "name": "Sahid Valenzuela",
     "pos": "SS"
+  },
+  "684665": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Luke Murphy",
+    "pos": "P"
   },
   "684974": {
     "bats": "R",
@@ -12903,6 +13179,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Peyton Battenfield",
+    "pos": "P"
+  },
+  "685464": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Cade Winquest",
     "pos": "P"
   },
   "685503": {
@@ -13030,6 +13312,12 @@
     "hand": "R",
     "name": "Isaac Collins",
     "pos": "LF"
+  },
+  "686560": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Gavin Collyer",
+    "pos": "P"
   },
   "686563": {
     "bats": "R",
@@ -13259,6 +13547,12 @@
     "name": "Mason Barnett",
     "pos": "P"
   },
+  "686934": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Alex McFarlane",
+    "pos": "P"
+  },
   "686948": {
     "bats": "L",
     "hand": "R",
@@ -13427,6 +13721,12 @@
     "name": "Darell Hernaiz",
     "pos": "SS"
   },
+  "687239": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Ben Peoples",
+    "pos": "P"
+  },
   "687263": {
     "bats": "R",
     "hand": "R",
@@ -13451,10 +13751,28 @@
     "name": "Geoffrey Gilbert",
     "pos": "P"
   },
+  "687282": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Gabriel Rincones Jr.",
+    "pos": "RF"
+  },
   "687287": {
     "bats": "R",
     "hand": "L",
     "name": "Patrick Monteverde",
+    "pos": "P"
+  },
+  "687309": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Cooper Hjerpe",
+    "pos": "P"
+  },
+  "687312": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Gabriel Hughes",
     "pos": "P"
   },
   "687330": {
@@ -13541,11 +13859,29 @@
     "name": "Grant McCray",
     "pos": "CF"
   },
+  "687531": {
+    "bats": "R",
+    "hand": "R",
+    "name": "William Kempner",
+    "pos": "P"
+  },
   "687551": {
     "bats": "L",
     "hand": "L",
     "name": "Drew Gilbert",
     "pos": "CF"
+  },
+  "687562": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Jake Bennett",
+    "pos": "P"
+  },
+  "687570": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Connor Prielipp",
+    "pos": "P"
   },
   "687589": {
     "bats": "R",
@@ -13721,6 +14057,12 @@
     "name": "Carson Whisenhunt",
     "pos": "P"
   },
+  "687941": {
+    "bats": "S",
+    "hand": "L",
+    "name": "Alec Gamboa",
+    "pos": "P"
+  },
   "687952": {
     "bats": "R",
     "hand": "R",
@@ -13871,6 +14213,12 @@
     "name": "Orion Kerkering",
     "pos": "P"
   },
+  "689149": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Chad Dallas",
+    "pos": "P"
+  },
   "689167": {
     "bats": "R",
     "hand": "R",
@@ -13913,6 +14261,12 @@
     "name": "Dylan Dodd",
     "pos": "P"
   },
+  "689296": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Anthony Nunez",
+    "pos": "P"
+  },
   "689337": {
     "bats": "R",
     "hand": "R",
@@ -13931,10 +14285,22 @@
     "name": "Liam Hicks",
     "pos": "C"
   },
+  "689441": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Coleman Crow",
+    "pos": "P"
+  },
   "689520": {
     "bats": "L",
     "hand": "R",
     "name": "Cody Laweryson",
+    "pos": "P"
+  },
+  "689546": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Nick Davila",
     "pos": "P"
   },
   "689557": {
@@ -13953,6 +14319,12 @@
     "bats": "L",
     "hand": "R",
     "name": "Alek Jacob",
+    "pos": "P"
+  },
+  "689818": {
+    "bats": "R",
+    "hand": "R",
+    "name": "David Sandlin",
     "pos": "P"
   },
   "689821": {
@@ -13985,6 +14357,18 @@
     "name": "Ryan Ritter",
     "pos": "SS"
   },
+  "690155": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Matt Pushard",
+    "pos": "P"
+  },
+  "690279": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Mason Adams",
+    "pos": "P"
+  },
   "690291": {
     "bats": "L",
     "hand": "R",
@@ -14001,6 +14385,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Michael Darrell-Hicks",
+    "pos": "P"
+  },
+  "690440": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Bradley Hanner",
     "pos": "P"
   },
   "690443": {
@@ -14069,6 +14459,12 @@
     "name": "Alex Freeland",
     "pos": "2B"
   },
+  "690978": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Dax Fulton",
+    "pos": "P"
+  },
   "690984": {
     "bats": "L",
     "hand": "R",
@@ -14116,6 +14512,12 @@
     "hand": "R",
     "name": "Robert Moore",
     "pos": "2B"
+  },
+  "691002": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Yohandy Morales",
+    "pos": "1B"
   },
   "691008": {
     "bats": "R",
@@ -14177,6 +14579,12 @@
     "name": "Jasson Dom\u00ednguez",
     "pos": "RF"
   },
+  "691181": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Emmanuel Rodriguez",
+    "pos": "CF"
+  },
   "691182": {
     "bats": "S",
     "hand": "R",
@@ -14201,6 +14609,12 @@
     "name": "Andry Lara",
     "pos": "P"
   },
+  "691277": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Deyvison De Los Santos",
+    "pos": "1B"
+  },
   "691285": {
     "bats": "L",
     "hand": "L",
@@ -14212,6 +14626,12 @@
     "hand": "R",
     "name": "Jhostynxon Garcia",
     "pos": "RF"
+  },
+  "691384": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Luis Perales",
+    "pos": "P"
   },
   "691398": {
     "bats": "L",
@@ -14236,6 +14656,12 @@
     "hand": "R",
     "name": "Cristian Mena",
     "pos": "P"
+  },
+  "691458": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Blaze Jordan",
+    "pos": "3B"
   },
   "691548": {
     "bats": "R",
@@ -14303,11 +14729,23 @@
     "name": "Coby Mayo",
     "pos": "3B"
   },
+  "691725": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Andrew Painter",
+    "pos": "P"
+  },
   "691728": {
     "bats": "L",
     "hand": "R",
     "name": "Zac Veen",
     "pos": "LF"
+  },
+  "691740": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Daniel Susac",
+    "pos": "C"
   },
   "691769": {
     "bats": "L",
@@ -14339,6 +14777,12 @@
     "name": "Marcelo Mayer",
     "pos": "2B"
   },
+  "691788": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Joe Mack",
+    "pos": "C"
+  },
   "691789": {
     "bats": "L",
     "hand": "R",
@@ -14351,11 +14795,29 @@
     "name": "Grant Taylor",
     "pos": "P"
   },
+  "691858": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jared Serna",
+    "pos": "2B"
+  },
   "691907": {
     "bats": "L",
     "hand": "R",
     "name": "Tsung-Che Cheng",
     "pos": "SS"
+  },
+  "691945": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Carter Baumler",
+    "pos": "P"
+  },
+  "691946": {
+    "bats": "R",
+    "hand": "R",
+    "name": "George Klassen",
+    "pos": "P"
   },
   "691951": {
     "bats": "L",
@@ -14447,6 +14909,12 @@
     "name": "Dillon Dingler",
     "pos": "C"
   },
+  "693308": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Nick Frasso",
+    "pos": "P"
+  },
   "693312": {
     "bats": "R",
     "hand": "R",
@@ -14481,6 +14949,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Cam Schlittler",
+    "pos": "P"
+  },
+  "693686": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Spencer Miles",
     "pos": "P"
   },
   "693725": {
@@ -14549,6 +15023,12 @@
     "name": "Jackson Chourio",
     "pos": "LF"
   },
+  "694197": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Angel Genao",
+    "pos": "2B"
+  },
   "694203": {
     "bats": "R",
     "hand": "R",
@@ -14597,6 +15077,18 @@
     "name": "Matt Svanson",
     "pos": "P"
   },
+  "694341": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Brendan Beck",
+    "pos": "P"
+  },
+  "694346": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Trey Gibson",
+    "pos": "P"
+  },
   "694350": {
     "bats": "R",
     "hand": "R",
@@ -14609,11 +15101,23 @@
     "name": "Tyler Gentry",
     "pos": "OF"
   },
+  "694357": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Ricky Tiedemann",
+    "pos": "P"
+  },
   "694359": {
     "bats": "L",
     "hand": "R",
     "name": "Niko Kavadas",
     "pos": "1B"
+  },
+  "694360": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Beck Way",
+    "pos": "P"
   },
   "694361": {
     "bats": "R",
@@ -14657,6 +15161,12 @@
     "name": "Nick Yorke",
     "pos": "3B"
   },
+  "694378": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Jacob Gonzalez",
+    "pos": "SS"
+  },
   "694384": {
     "bats": "L",
     "hand": "R",
@@ -14674,6 +15184,12 @@
     "hand": "R",
     "name": "Joey Loperfido",
     "pos": "LF"
+  },
+  "694397": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Marco Raya",
+    "pos": "P"
   },
   "694410": {
     "bats": "R",
@@ -14703,6 +15219,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Chad Patrick",
+    "pos": "P"
+  },
+  "694494": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Ty Johnson",
     "pos": "P"
   },
   "694496": {
@@ -14753,6 +15275,12 @@
     "name": "Wyatt Langford",
     "pos": "LF"
   },
+  "694673": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Abimelec Ortiz",
+    "pos": "1B"
+  },
   "694674": {
     "bats": "R",
     "hand": "R",
@@ -14777,11 +15305,23 @@
     "name": "Landen Roupp",
     "pos": "P"
   },
+  "694753": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Khristian Curtis",
+    "pos": "P"
+  },
   "694754": {
     "bats": "R",
     "hand": "R",
     "name": "Sabin Ceballos",
     "pos": "3B"
+  },
+  "694795": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Josh Ekness",
+    "pos": "P"
   },
   "694806": {
     "bats": "R",
@@ -14805,6 +15345,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Jacob Misiorowski",
+    "pos": "P"
+  },
+  "694820": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Braxton Roxby",
     "pos": "P"
   },
   "694834": {
@@ -14879,6 +15425,12 @@
     "name": "Nate Nankil",
     "pos": "OF"
   },
+  "695001": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Alimber Santa",
+    "pos": "P"
+  },
   "695020": {
     "bats": "R",
     "hand": "R",
@@ -14890,6 +15442,18 @@
     "hand": "L",
     "name": "Eddie Park",
     "pos": "OF"
+  },
+  "695034": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Kade Morris",
+    "pos": "P"
+  },
+  "695049": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Brett Kerry",
+    "pos": "P"
   },
   "695071": {
     "bats": "R",
@@ -14908,6 +15472,12 @@
     "hand": "R",
     "name": "Will Wagner",
     "pos": "DH"
+  },
+  "695239": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Robby Ahlstrom",
+    "pos": "P"
   },
   "695243": {
     "bats": "R",
@@ -14931,6 +15501,12 @@
     "bats": "R",
     "hand": "R",
     "name": "Jack Sinclair",
+    "pos": "P"
+  },
+  "695380": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Alex Hoppe",
     "pos": "P"
   },
   "695391": {
@@ -14993,6 +15569,12 @@
     "name": "Jac Caglianone",
     "pos": "RF"
   },
+  "695508": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Cam Cauley",
+    "pos": "CF"
+  },
   "695521": {
     "bats": "L",
     "hand": "R",
@@ -15035,6 +15617,12 @@
     "name": "Benny Montgomery",
     "pos": "OF"
   },
+  "695611": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Gage Jump",
+    "pos": "P"
+  },
   "695657": {
     "bats": "L",
     "hand": "R",
@@ -15052,6 +15640,24 @@
     "hand": "R",
     "name": "Christian Moore",
     "pos": "2B"
+  },
+  "695684": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Elmer Rodr\u00edguez",
+    "pos": "P"
+  },
+  "695720": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Tommy White",
+    "pos": "1B"
+  },
+  "695731": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Braden Montgomery",
+    "pos": "RF"
   },
   "695734": {
     "bats": "L",
@@ -15071,6 +15677,18 @@
     "name": "Alejandro Osuna",
     "pos": "LF"
   },
+  "696062": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Wilber Dotel",
+    "pos": "P"
+  },
+  "696070": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Kendry Rojas",
+    "pos": "P"
+  },
   "696100": {
     "bats": "R",
     "hand": "R",
@@ -15082,6 +15700,12 @@
     "hand": "R",
     "name": "Mason Black",
     "pos": "P"
+  },
+  "696135": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Kahlil Watson",
+    "pos": "RF"
   },
   "696136": {
     "bats": "L",
@@ -15125,6 +15749,18 @@
     "name": "Jacob Young",
     "pos": "CF"
   },
+  "696519": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Samy Natera Jr.",
+    "pos": "P"
+  },
+  "696522": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Hayden Juenger",
+    "pos": "P"
+  },
   "697812": {
     "bats": "L",
     "hand": "L",
@@ -15149,17 +15785,41 @@
     "name": "Ronald Hernandez",
     "pos": "C"
   },
+  "699008": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Antwone Kelly",
+    "pos": "P"
+  },
   "699013": {
     "bats": "R",
     "hand": "R",
     "name": "Esmerlyn Valdez",
     "pos": "RF"
   },
+  "699024": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Leo Bernal",
+    "pos": "C"
+  },
+  "699044": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Miguel Ullola",
+    "pos": "P"
+  },
   "699073": {
     "bats": "S",
     "hand": "R",
     "name": "Thayron Liranzo",
     "pos": "C"
+  },
+  "699115": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Carlos Jorge",
+    "pos": "CF"
   },
   "699127": {
     "bats": "L",
@@ -15178,6 +15838,24 @@
     "hand": "R",
     "name": "Bradgley Rodriguez",
     "pos": "P"
+  },
+  "699151": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jedixson Paez",
+    "pos": "P"
+  },
+  "699302": {
+    "bats": "L",
+    "hand": "R",
+    "name": "H\u00e9ctor Rodr\u00edguez",
+    "pos": "RF"
+  },
+  "699393": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Pedro Ram\u00edrez",
+    "pos": "2B"
   },
   "699615": {
     "bats": "L",
@@ -15317,6 +15995,12 @@
     "name": "Ben Sears",
     "pos": "P"
   },
+  "700842": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Eduardo Rivera",
+    "pos": "P"
+  },
   "700932": {
     "bats": "L",
     "hand": "R",
@@ -15364,6 +16048,12 @@
     "hand": "R",
     "name": "Sal Stewart",
     "pos": "1B"
+  },
+  "701474": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Duncan Davitt",
+    "pos": "P"
   },
   "701481": {
     "bats": "L",
@@ -15437,17 +16127,47 @@
     "name": "Hao-Yu Lee",
     "pos": "2B"
   },
+  "701719": {
+    "bats": "R",
+    "hand": "L",
+    "name": "Tyler Samaniego",
+    "pos": "P"
+  },
   "701762": {
     "bats": "L",
     "hand": "L",
     "name": "Nick Kurtz",
     "pos": "1B"
   },
+  "701785": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Kaelen Culpepper",
+    "pos": "SS"
+  },
+  "701807": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Carson Benge",
+    "pos": "RF"
+  },
   "701831": {
     "bats": "L",
     "hand": "R",
     "name": "Carson DeMartini",
     "pos": "3B"
+  },
+  "701852": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Drew Cavanaugh",
+    "pos": "C"
+  },
+  "702021": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Will Dion",
+    "pos": "P"
   },
   "702056": {
     "bats": "R",
@@ -15485,11 +16205,29 @@
     "name": "Ruben Ibarra",
     "pos": "1B"
   },
+  "702153": {
+    "bats": "S",
+    "hand": "L",
+    "name": "Brian Fitzpatrick",
+    "pos": "P"
+  },
   "702176": {
     "bats": "L",
     "hand": "R",
     "name": "Alan Roden",
     "pos": "RF"
+  },
+  "702193": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Andrew Morris",
+    "pos": "P"
+  },
+  "702222": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Justin Crawford",
+    "pos": "CF"
   },
   "702258": {
     "bats": "R",
@@ -15503,11 +16241,23 @@
     "name": "Noah Schultz",
     "pos": "P"
   },
+  "702275": {
+    "bats": "R",
+    "hand": "R",
+    "name": "JR Ritchie",
+    "pos": "P"
+  },
   "702284": {
     "bats": "L",
     "hand": "R",
     "name": "Cole Young",
     "pos": "2B"
+  },
+  "702303": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Riley Martin",
+    "pos": "P"
   },
   "702315": {
     "bats": "R",
@@ -15556,6 +16306,18 @@
     "hand": "R",
     "name": "Tommy Specht",
     "pos": "OF"
+  },
+  "702474": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Mike Paredes",
+    "pos": "P"
+  },
+  "702566": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Owen Murphy",
+    "pos": "P"
   },
   "702574": {
     "bats": "S",
@@ -15611,6 +16373,12 @@
     "name": "Douglas Orellana",
     "pos": "P"
   },
+  "702885": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Cesar Perdomo",
+    "pos": "P"
+  },
   "703154": {
     "bats": "R",
     "hand": "R",
@@ -15623,17 +16391,47 @@
     "name": "Lazaro Montes",
     "pos": "RF"
   },
+  "703197": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Michael Arroyo",
+    "pos": "SS"
+  },
   "703231": {
     "bats": "R",
     "hand": "R",
     "name": "James Meeker",
     "pos": "P"
   },
+  "703492": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Nick Morabito",
+    "pos": "LF"
+  },
+  "703520": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Brett Bateman",
+    "pos": "CF"
+  },
   "703601": {
     "bats": "L",
     "hand": "L",
     "name": "Max Clark",
     "pos": "CF"
+  },
+  "703607": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Henry Bolte",
+    "pos": "CF"
+  },
+  "703615": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jose Cabrera",
+    "pos": "P"
   },
   "703639": {
     "bats": "R",
@@ -15658,6 +16456,12 @@
     "hand": "R",
     "name": "Adam Mazur",
     "pos": "P"
+  },
+  "800050": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Chase DeLauter",
+    "pos": "RF"
   },
   "800056": {
     "bats": "S",
@@ -15689,11 +16493,29 @@
     "name": "Didier Fuentes",
     "pos": "P"
   },
+  "800325": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Luis Lara",
+    "pos": "RF"
+  },
   "800478": {
     "bats": "S",
     "hand": "R",
     "name": "Kleimir Lemos",
     "pos": "3B"
+  },
+  "800543": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Josue De Paula",
+    "pos": "DH"
+  },
+  "800600": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Jackson Kent",
+    "pos": "P"
   },
   "800724": {
     "bats": "L",
@@ -15718,6 +16540,12 @@
     "hand": "R",
     "name": "Walker Janek",
     "pos": "C"
+  },
+  "801126": {
+    "bats": "S",
+    "hand": "R",
+    "name": "Brock Rodden",
+    "pos": "SS"
   },
   "801128": {
     "bats": "R",
@@ -15773,6 +16601,12 @@
     "name": "Jack Pineda",
     "pos": "SS"
   },
+  "801501": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Nate Furman",
+    "pos": "2B"
+  },
   "801619": {
     "bats": "R",
     "hand": "R",
@@ -15785,6 +16619,12 @@
     "name": "Cade McGee",
     "pos": "C"
   },
+  "801725": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Luis De Le\u00f3n",
+    "pos": "P"
+  },
   "801870": {
     "bats": "R",
     "hand": "R",
@@ -15796,6 +16636,18 @@
     "hand": "R",
     "name": "Avery Owusu-Asiedu",
     "pos": "CF"
+  },
+  "802139": {
+    "bats": "L",
+    "hand": "R",
+    "name": "JJ Wetherholt",
+    "pos": "2B"
+  },
+  "802408": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Brycen Mautz",
+    "pos": "P"
   },
   "802415": {
     "bats": "L",
@@ -15839,6 +16691,12 @@
     "name": "Max Holy",
     "pos": "SS"
   },
+  "803011": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Sam Antonacci",
+    "pos": "LF"
+  },
   "803172": {
     "bats": "R",
     "hand": "R",
@@ -15850,6 +16708,24 @@
     "hand": "R",
     "name": "Zach Levenson",
     "pos": "OF"
+  },
+  "804267": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Zac Thornton",
+    "pos": "P"
+  },
+  "804606": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Konnor Griffin",
+    "pos": "SS"
+  },
+  "804619": {
+    "bats": "R",
+    "hand": "R",
+    "name": "John Klein",
+    "pos": "P"
   },
   "804636": {
     "bats": "R",
@@ -15868,6 +16744,18 @@
     "hand": "R",
     "name": "Bryan Rincon",
     "pos": "SS"
+  },
+  "804926": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Austin Peterson",
+    "pos": "P"
+  },
+  "805074": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Yunior Marte",
+    "pos": "P"
   },
   "805123": {
     "bats": "R",
@@ -15899,6 +16787,24 @@
     "name": "Dervy Ventura",
     "pos": "2B"
   },
+  "805326": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Tyler Schweitzer",
+    "pos": "P"
+  },
+  "805345": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Trent Harris",
+    "pos": "P"
+  },
+  "805346": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Ben Ross",
+    "pos": "SS"
+  },
   "805347": {
     "bats": "L",
     "hand": "R",
@@ -15922,6 +16828,12 @@
     "hand": "L",
     "name": "Drew Sommers",
     "pos": "P"
+  },
+  "805672": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Collin Price",
+    "pos": "C"
   },
   "805673": {
     "bats": "R",
@@ -15952,6 +16864,12 @@
     "hand": "R",
     "name": "Arjun Nimmala",
     "pos": "SS"
+  },
+  "805805": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Walker Jenkins",
+    "pos": "CF"
   },
   "805808": {
     "bats": "L",
@@ -15989,11 +16907,23 @@
     "name": "Boston Baro",
     "pos": "SS"
   },
+  "805999": {
+    "bats": "L",
+    "hand": "R",
+    "name": "A.J. Ewing",
+    "pos": "CF"
+  },
   "806005": {
     "bats": "R",
     "hand": "R",
     "name": "Ryan McCarty",
     "pos": "1B"
+  },
+  "806068": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Colt Emerson",
+    "pos": "SS"
   },
   "806077": {
     "bats": "L",
@@ -16073,6 +17003,12 @@
     "name": "Jack Dallas",
     "pos": "P"
   },
+  "806956": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Ethan Salas",
+    "pos": "C"
+  },
   "806960": {
     "bats": "R",
     "hand": "R",
@@ -16109,17 +17045,41 @@
     "name": "Matt Shaw",
     "pos": "RF"
   },
+  "807726": {
+    "bats": "R",
+    "hand": "R",
+    "name": "John Peck",
+    "pos": "SS"
+  },
+  "807727": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Charles McAdoo",
+    "pos": "2B"
+  },
   "807728": {
     "bats": "R",
     "hand": "R",
     "name": "Carter Graham",
     "pos": "1B"
   },
+  "807739": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Kade Anderson",
+    "pos": "P"
+  },
   "807742": {
     "bats": "L",
     "hand": "R",
     "name": "Colton Ledbetter",
     "pos": "CF"
+  },
+  "807743": {
+    "bats": "R",
+    "hand": "L",
+    "name": "Sean Sullivan",
+    "pos": "P"
   },
   "807747": {
     "bats": "L",
@@ -16157,6 +17117,12 @@
     "name": "Andres Valor",
     "pos": "OF"
   },
+  "808825": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Andrew Sears",
+    "pos": "P"
+  },
   "808864": {
     "bats": "R",
     "hand": "R",
@@ -16168,6 +17134,12 @@
     "hand": "R",
     "name": "Jack Young",
     "pos": "P"
+  },
+  "808959": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Munetaka Murakami",
+    "pos": "1B"
   },
   "808963": {
     "bats": "R",
@@ -16217,6 +17189,18 @@
     "name": "Nigel Belgrave",
     "pos": "P"
   },
+  "811315": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Brody Hopkins",
+    "pos": "P"
+  },
+  "811965": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Joshua Kuroda-Grauer",
+    "pos": "3B"
+  },
   "812470": {
     "bats": "L",
     "hand": "R",
@@ -16234,6 +17218,12 @@
     "hand": "R",
     "name": "Phil Fox",
     "pos": "P"
+  },
+  "813841": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Jonah Cox",
+    "pos": "CF"
   },
   "813882": {
     "bats": "R",
@@ -16259,6 +17249,12 @@
     "name": "John Wimmer",
     "pos": "2B"
   },
+  "814154": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Scott Bandura",
+    "pos": "LF"
+  },
   "814172": {
     "bats": "L",
     "hand": "R",
@@ -16276,6 +17272,12 @@
     "hand": "R",
     "name": "Pascanel Ferreras",
     "pos": "SS"
+  },
+  "814305": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Yunior Tur",
+    "pos": "P"
   },
   "814307": {
     "bats": "L",
@@ -16301,6 +17303,12 @@
     "name": "Ian Petrutz",
     "pos": "OF"
   },
+  "814430": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Brett Callahan",
+    "pos": "LF"
+  },
   "814431": {
     "bats": "L",
     "hand": "L",
@@ -16324,6 +17332,12 @@
     "hand": "R",
     "name": "Jakob Christian",
     "pos": "1B"
+  },
+  "814490": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Ethan Pecko",
+    "pos": "P"
   },
   "814527": {
     "bats": "R",
@@ -16367,6 +17381,12 @@
     "name": "Aidan Longwell",
     "pos": "1B"
   },
+  "815081": {
+    "bats": "R",
+    "hand": "L",
+    "name": "Mark Manfredi",
+    "pos": "P"
+  },
   "815083": {
     "bats": "L",
     "hand": "L",
@@ -16391,6 +17411,12 @@
     "name": "Josh Harlow",
     "pos": "P"
   },
+  "815589": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Bo Davidson",
+    "pos": "RF"
+  },
   "815734": {
     "bats": "R",
     "hand": "R",
@@ -16402,6 +17428,12 @@
     "hand": "R",
     "name": "Carter Johnson",
     "pos": "SS"
+  },
+  "815873": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Sean Keys",
+    "pos": "DH"
   },
   "820862": {
     "bats": "R",
@@ -16420,6 +17452,12 @@
     "hand": "R",
     "name": "Cooper Adams",
     "pos": "P"
+  },
+  "823550": {
+    "bats": "L",
+    "hand": "R",
+    "name": "Sung-Mun Song",
+    "pos": "2B"
   },
   "823996": {
     "bats": "L",
@@ -16463,10 +17501,22 @@
     "name": "Jonathan Todd",
     "pos": "P"
   },
+  "828599": {
+    "bats": "L",
+    "hand": "L",
+    "name": "Lucas Spence",
+    "pos": "CF"
+  },
   "829272": {
     "bats": "L",
     "hand": "L",
     "name": "Shinnosuke Ogasawara",
+    "pos": "P"
+  },
+  "837227": {
+    "bats": "R",
+    "hand": "R",
+    "name": "Tatsuya Imai",
     "pos": "P"
   }
 }

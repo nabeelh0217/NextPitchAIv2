@@ -1,45 +1,122 @@
 {
-  "split": "temporal, validate on 2025",
-  "temperature": 0.875,
-  "n_val": 729688,
-  "section5_lift_vs_scout": 0.007487001616492628,
-  "section5_verdict": "WEAK",
+  "schema": 2,
+  "status": "confirmed",
+  "split": "trained through 2024, tuned on 2025, tested on 2026",
+  "model_split": "temporal, validate on 2025",
+  "evaluated_season": 2026,
+  "n_val": 714061,
+  "n_train": 2133653,
+  "train_through": 2024,
+  "tuned_on": 2025,
+  "temperature": 0.95,
+  "threshold": 0.65,
+  "model_sha256": "62e632d455aa76486020aac0b1dde342dff08f6d6e5a91ae1f5468d149622216",
+  "mask": "causal \u2014 pitches thrown before each pitch (all ones until 100 career pitches)",
+  "baseline": "live_side_season",
+  "baseline_label": "the same, weighted to this season",
+  "baseline_plain": "split by count and batter side, weighted toward the current season, and updated after every pitch",
+  "min_edge": 0.02,
+  "min_coverage": 0.1,
+  "recommended": {
+    "threshold": 0.65,
+    "coverage": 0.3467532885845887,
+    "n_advised": 247603,
+    "tool_accuracy": 0.7330000040387232,
+    "table_accuracy": 0.7121642306434091,
+    "edge": 0.020835773395314172,
+    "edge_ci": [
+      0.017898447004064944,
+      0.023721521572300296
+    ],
+    "ladder": {
+      "live": 0.7120955723476694,
+      "live_side": 0.7109647298296062,
+      "live_side_season": 0.7121642306434091,
+      "frozen": 0.6797534763310622
+    }
+  },
+  "overall": {
+    "lift": -0.00738410368948017,
+    "ci": [
+      -0.011040406714451972,
+      -0.0038209885433368304
+    ],
+    "cells_won": 0.4226718403547672,
+    "verdict": "behind",
+    "model": 0.6055136469620079,
+    "bar": 0.6128977506514881
+  },
+  "section5_lift_vs_scout": -0.00738410368948017,
+  "section5_verdict": "behind",
   "slice": [
     {
       "threshold": 0.6,
-      "coverage": 0.5476422799881593,
-      "tool_accuracy": 0.6806645512602351,
-      "table_accuracy": 0.6418064703409341,
-      "edge": 0.038858080919300986
+      "coverage": 0.5416191577770225,
+      "tool_accuracy": 0.6818905248562168,
+      "table_accuracy": 0.664221571658827,
+      "edge": 0.017668953197389814
     },
     {
       "threshold": 0.65,
-      "coverage": 0.35240130028176425,
-      "tool_accuracy": 0.7254407080884955,
-      "table_accuracy": 0.6830790649560751,
-      "edge": 0.04236164313242041
+      "coverage": 0.34486520266195964,
+      "tool_accuracy": 0.7285331659010348,
+      "table_accuracy": 0.7058582759771741,
+      "edge": 0.022674889923860686
     },
     {
       "threshold": 0.7,
-      "coverage": 0.20231523610090887,
-      "tool_accuracy": 0.7805618213470435,
-      "table_accuracy": 0.7404065651947137,
-      "edge": 0.04015525615232984
+      "coverage": 0.19686907280920066,
+      "tool_accuracy": 0.7852881596625201,
+      "table_accuracy": 0.7632141340591564,
+      "edge": 0.02207402560336369
     },
     {
       "threshold": 0.75,
-      "coverage": 0.11023204438061199,
-      "tool_accuracy": 0.8394728662895505,
-      "table_accuracy": 0.8077702492695966,
-      "edge": 0.031702617019953916
+      "coverage": 0.10809277389788512,
+      "tool_accuracy": 0.8405938585592211,
+      "table_accuracy": 0.8242006237796993,
+      "edge": 0.016393234779521815
+    },
+    {
+      "threshold": 0.8,
+      "coverage": 0.06062042955345298,
+      "tool_accuracy": 0.894605959216892,
+      "table_accuracy": 0.8829633313740561,
+      "edge": 0.011642627842835873
     }
   ],
-  "recommended": {
-    "threshold": 0.65,
-    "coverage": 0.35240130028176425,
-    "tool_accuracy": 0.7254407080884955,
-    "table_accuracy": 0.6830790649560751,
-    "edge": 0.04236164313242041
+  "validation": {
+    "season": 2025,
+    "n": 729688,
+    "recommended": {
+      "threshold": 0.65,
+      "coverage": 0.34486520266195964,
+      "n_advised": 251644,
+      "tool_accuracy": 0.7285331659010348,
+      "table_accuracy": 0.7058582759771741,
+      "edge": 0.022674889923860686,
+      "edge_ci": [
+        0.02000163313216277,
+        0.025675100996633036
+      ],
+      "ladder": {
+        "live": 0.704594586002448,
+        "live_side": 0.7036527793231708,
+        "live_side_season": 0.7058582759771741,
+        "frozen": 0.6859491980734689
+      }
+    },
+    "overall": {
+      "lift": -0.005096745652206747,
+      "ci": [
+        -0.008790380995344375,
+        -0.0012933704606153931
+      ],
+      "cells_won": 0.4403694648193426,
+      "verdict": "behind",
+      "model": 0.605340312903177,
+      "bar": 0.6104370585553838
+    }
   },
   "shippable": true
 }

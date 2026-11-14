@@ -1,6 +1,6 @@
 {
   "version": 6,
-  "n_samples": 2863341,
+  "n_samples": 3577402,
   "seq_len": 8,
   "seq_feats": 22,
   "ctx_feats": 63,
@@ -100,13 +100,28 @@
     2022,
     2023,
     2024,
+    2025,
+    2026
+  ],
+  "fit_seasons": [
+    2022,
+    2023,
+    2024,
     2025
   ],
+  "frozen_from": "/Users/nabeel/NextPitchAIv2/data_v5",
+  "build_id": null,
   "n_pitcher_ids": 1236,
   "n_batter_ids": 971,
   "n_park_ids": 31,
   "n_catcher_ids": 167,
   "min_pitcher_appearances": 100,
   "min_batter_appearances": 50,
-  "min_catcher_appearances": 200
+  "min_catcher_appearances": 200,
+  "input_drift": {
+    "notes": [],
+    "stops": []
+  },
+  "verified_against_frozen": true,
+  "model_sha256": "62e632d455aa76486020aac0b1dde342dff08f6d6e5a91ae1f5468d149622216"
 }
