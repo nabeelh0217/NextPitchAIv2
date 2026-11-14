@@ -1076,17 +1076,36 @@ table lacked for exactly the pitchers a frozen table is worst at, and
 that is likely where much of the +4.2 came from. I do not know whether
 what remains is above zero.
 
-### RESULT
+### RESULT (2026-11-14): CONFIRMED, at half the old figure
 
-_Pending — the scrape cannot run from the sandbox. Run the four commands
-under "How to run" in AGENTS.md and paste the report's sections A, 6, 7
-and the two verdicts here._
+Run on the user's machine, 714,061 pitches of 2026, everything locked on
+2025 (T 0.950, threshold 65%, bar = count x side table weighted to the
+season). One look.
 
 | | speaks on | tool | bar | edge | 95% CI |
 |---|---|---|---|---|---|
 | published (old gate, 2025) | 35.2% | 72.5% | 68.3% | +4.2% | — |
-| 2025, fair measurement | | | | | |
-| **2026, clean test** | | | | | |
+| re-derived with the old gate's inputs | 35.2% | 72.5% | 68.3% | +4.2% | — |
+| 2025, fair measurement | 34.5% | 72.9% | 70.6% | +2.3% | [+2.0, +2.6] |
+| **2026, clean test** | **34.7%** | **73.3%** | **71.2%** | **+2.1%** | **[+1.8, +2.4]** |
+
+- The old number re-derives exactly, so nothing else moved.
+- Where the 4.2 went: causal mask 4.2 -> 4.2, unknown-id rule -> 4.3,
+  table kept current -> 2.4, split by side -> 2.5, season-weighted ->
+  2.3. Essentially the whole drop is defect 1: the frozen table. The
+  mask leak and the untrained embeddings moved the edge by 0.1 or less.
+- 2025 -> 2026 lost 0.2 points; the tuning season barely flattered it.
+- The verdict meets the pre-registered rule (edge >= +2.0, interval
+  excludes zero), but only just: the interval's lower end is +1.8.
+- Section 5 on 2026: across 3,608 situations the model is BEHIND the
+  table, -0.7% [-1.1, -0.4], winning 42% of them. Selective overlay
+  only; never "better than a scouting report".
+- In 2026, 13.1% of pitches came from pitchers, 11.7% from batters and
+  13.0% from catchers the model never trained on.
+- Bundle rebuilt from data_ext: 1,387 pitchers (269 without an
+  embedding), 1,074 batters, 3.8 MB, data through 2026-09-27.
+
+2026 is now spent as a clean test for this model.
 
 ### First real attempt (2026-11-13): the scrape could not save, and what that exposed
 

@@ -304,20 +304,20 @@ features do anything at all**. 10-class top-1 reads lower than the old
   season, and never-trained embedding rows fed to the model. All four
   are fixed in the code. `docs/EXPERIMENTS.md` has the detail and the
   criteria, which were written before any 2026 pitch was scored.
-- **The 2026 result is PENDING.** It needs the scrape, which cannot run
-  from a sandbox. Until `./run_new_season.sh` has been run and the bundle
-  committed, the live site shows the run-12 figure with a note that it
-  was measured against a frozen report.
+- **The 2026 result is in (2026-11-14): CONFIRMED.** On 34.7% of 2026
+  pitches the tool speaks; it is right 73.3%, an up-to-date count x side
+  scouting table 71.2% — **+2.1 points, 95% CI [+1.8, +2.4]**. That is
+  the claim, always with its coverage. It clears the +2.0 bar narrowly.
+  Across all situations the model is behind the table (-0.7%, wins 42%
+  of cells). Nearly all of the fall from +4.2 was the frozen table.
+  2026 is spent as a clean test for this model.
 - **The first real attempt failed at the scrape (2026-11-13)** and is
   fixed: see invariants 14-17 and the entry in `docs/EXPERIMENTS.md`.
   The user's machine is Python 3.13, pandas 2.3.3, pyarrow 21.0.0, with
   a parquet written under pandas 3 (dates as text). On that machine the
   frozen extension reproduced all 2,863,341 original rows exactly, so
   preprocessing itself is not sensitive to the pandas change.
-- **Do not quote +4.2, and do not guess the new number.** On a synthetic
-  league the same corrections took a +2.0 edge to zero. That shows the
-  code works; it says nothing about the size of the effect on real
-  pitching.
+- **Do not quote +4.2.** Quote +2.1 on 35%, with the interval.
 - **The site's words follow the verdict.** `site/app.py:claim_view`
   picks the sentences from the gate's status (confirmed / reduced /
   not_confirmed / validation_only / legacy), including the last
